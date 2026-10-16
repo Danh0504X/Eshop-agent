@@ -1,6 +1,8 @@
 import express from "express";
 import mongoose from "mongoose";
+import swaggerUi from "swagger-ui-express";
 import { env } from "../config/env";
+import { openApiDocument } from "../docs/openapi";
 import authRoute from "./authRoute";
 import claimRoute from "./claimRoute";
 import inspectionRoute from "./inspectionRoute";
@@ -20,6 +22,11 @@ router.get("/health", (_request, response) => {
         planner: env.aiMode === "real" ? env.AGENT_PLANNER : "deterministic",
     });
 });
+
+router.get("/openapi.json", (_request, response) => {
+    response.json(openApiDocument);
+});
+router.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDocument, { customSiteTitle: "FixIt AI Agent API" }));
 
 router.use("/auth", authRoute);
 router.use("/orders", orderRoute);
