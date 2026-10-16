@@ -2,6 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import { env } from "../config/env";
 import authRoute from "./authRoute";
+import inspectionRoute from "./inspectionRoute";
 import mediaRoute from "./mediaRoute";
 import orderRoute from "./orderRoute";
 
@@ -22,5 +23,6 @@ router.get("/health", (_request, response) => {
 router.use("/auth", authRoute);
 router.use("/orders", orderRoute);
 router.use("/media", mediaRoute);
+router.use("/inspections", inspectionRoute);
 
 export default router;

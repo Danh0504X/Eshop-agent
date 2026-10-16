@@ -66,6 +66,7 @@ const EnvSchema = z
         MAX_TIMESTAMP_GAP_SEC: z.coerce.number().positive().default(2),
 
         RATE_LIMIT_INSPECTIONS_PER_15MIN: z.coerce.number().int().positive().default(20),
+        INSPECTION_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
         RETENTION_DAYS: z.coerce.number().int().positive().default(180),
         RETENTION_SWEEP_HOURS: z.coerce.number().nonnegative().default(0),
         LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),

@@ -3,10 +3,12 @@ import fs from "node:fs";
 import app from "./app";
 import { connectDB } from "./config/db";
 import { env } from "./config/env";
+import { recoverInterruptedInspections } from "./services/inspectionQueue";
 
 const startServer = async () => {
     fs.mkdirSync(env.uploadDirAbs, { recursive: true });
     await connectDB();
+    await recoverInterruptedInspections();
     app.listen(env.PORT, () => {
         console.info(`Server is running on port ${env.PORT} [${env.NODE_ENV}]`);
         console.info(
