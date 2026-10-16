@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+*.log
+coverage/
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/.mongo-data/
+backend/sample-videos/
+frontend/dist/
+backend/tests/.fixtures/
