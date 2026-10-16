@@ -2,6 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import { env } from "../config/env";
 import authRoute from "./authRoute";
+import claimRoute from "./claimRoute";
 import inspectionRoute from "./inspectionRoute";
 import mediaRoute from "./mediaRoute";
 import orderRoute from "./orderRoute";
@@ -24,5 +25,6 @@ router.use("/auth", authRoute);
 router.use("/orders", orderRoute);
 router.use("/media", mediaRoute);
 router.use("/inspections", inspectionRoute);
+router.use("/claims", claimRoute);
 
 export default router;

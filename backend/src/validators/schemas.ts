@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CLAIM_STATUSES, FINAL_DETERMINATIONS } from "../models/Claim";
 import { MEDIA_TYPES } from "../models/MediaEvidence";
 
 const identifier = z
@@ -67,3 +68,31 @@ export const deleteMediaSchema = z.object({
 });
 
 export const objectIdParam = z.string().regex(/^[a-f0-9]{24}$/i, "Invalid id");
+
+const reason = z.string().trim().min(5, "Give a reason of at least 5 characters").max(1000);
+
+export const approveClaimSchema = z.object({
+    reason,
+    finalDetermination: z.enum(FINAL_DETERMINATIONS).optional(),
+});
+
+export const reasonSchema = z.object({ reason });
+
+export const markSubmittedSchema = z.object({
+    externalReference: z.string().trim().max(200).optional(),
+    note: z.string().trim().max(1000).optional(),
+});
+
+export const refundSchema = z
+    .object({
+        requestedCompensation: z.number().min(0).max(10_000_000),
+        actualRefund: z.number().min(0).max(10_000_000),
+        note: z.string().trim().max(500).optional(),
+    })
+    .strict();
+
+export const listClaimsQuery = z.object({
+    status: z.enum(CLAIM_STATUSES).optional(),
+    orderId: z.string().max(64).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+});
