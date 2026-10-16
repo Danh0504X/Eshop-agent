@@ -43,7 +43,11 @@ export const buildClaimPack = async (input: ClaimPackInput): Promise<ClaimDoc> =
         throw new ApiError("INVALID_STATE", "No material discrepancy was observed; no claim is needed");
     }
 
-    const existing = await Claim.findOne({ inspectionId: inspection._id });
+    // Reuse only an undecided draft; a retried inspection must not resurface an already decided claim.
+    const existing = await Claim.findOne({
+        inspectionId: inspection._id,
+        status: { $in: ["draft", "pending_approval"] },
+    });
     if (existing?.reportStorageKey && (await storage().exists(existing.reportStorageKey))) return existing;
 
     const summary = buildNeutralSummary(order, comparison);
