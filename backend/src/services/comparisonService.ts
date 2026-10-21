@@ -17,6 +17,7 @@ export type FindingCategory =
     | "color_mismatch"
     | "missing_accessory"
     | "packaging_condition_change"
+    | "product_condition_change"
     | "unverifiable_attribute";
 
 export interface EvidenceRef {
@@ -337,6 +338,9 @@ export const compareAnalyses = (
         );
     }
 
+    // 6. Product condition (damage on the item itself)
+    if (oi && ri && !returnEmpty) compareProductCondition(ctx, oi.condition, ri.condition);
+
     const material = ctx.findings.filter(
         (f) => severityRank(f.severity) >= severityRank("medium") && f.certainty === "observed",
     );
@@ -355,6 +359,69 @@ export const compareAnalyses = (
         disclaimer: DISCLAIMER,
         comparedAt: new Date().toISOString(),
     };
+};
+
+type ProductCondition = VisionAnalysis["items"][number]["condition"];
+type Damage = ProductCondition["damage"][number];
+
+/** Breakage outranks cosmetic marks; "major" lifts a cosmetic mark to medium. */
+const damageSeverity = (d: Damage): Severity => {
+    if (d.kind === "crack" || d.kind === "broken" || d.kind === "missing_part") return "high";
+    return d.severity === "major" ? "medium" : "low";
+};
+
+/**
+ * Damage visible in the return but not when packed is reported as a visual difference only: the video
+ * cannot show when or how it happened. Uncertain sightings, or an outbound view that did not show the
+ * surface clearly, are reported as unverifiable rather than as new damage.
+ */
+const compareProductCondition = (ctx: Ctx, out: ProductCondition, ret: ProductCondition) => {
+    if (out.status === "not_visible" && ret.status === "not_visible") return;
+    const outRefs = refs(ctx.out, [...out.frameIds, ...out.damage.flatMap((d) => d.frameIds)]);
+    const describeCondition = (c: ProductCondition) =>
+        c.status === "not_visible"
+            ? "surface not visible"
+            : c.damage.length
+              ? c.damage.map((d) => `${d.kind} (${d.severity}, ${d.certainty})`).join(", ")
+              : `no visible damage (${c.status})`;
+
+    const preexisting = new Set(out.damage.map((d) => d.kind));
+    const newDamage = ret.damage.filter((d) => !preexisting.has(d.kind));
+    if (newDamage.length === 0) {
+        if (ret.status !== "observed" || out.status !== "observed") {
+            unverifiable(ctx, "Product condition", describeCondition(out), describeCondition(ret), [
+                ...outRefs,
+                ...refs(ctx.ret, ret.frameIds),
+            ]);
+        }
+        return;
+    }
+
+    for (const d of newDamage) {
+        const evidence = [...outRefs, ...refs(ctx.ret, d.frameIds)];
+        // Only a clear outbound view of the surface can show the damage was absent when packed.
+        if (d.certainty !== "observed" || out.status !== "observed") {
+            unverifiable(
+                ctx,
+                `Product condition (${d.kind})`,
+                describeCondition(out),
+                describeCondition(ret),
+                evidence,
+            );
+            continue;
+        }
+        add(ctx, {
+            category: "product_condition_change",
+            severity: damageSeverity(d),
+            certainty: "observed",
+            description:
+                `The return recording shows ${d.severity} ${d.kind.replace("_", " ")} (${d.description}) that was not visible ` +
+                "when packed. The recordings cannot show when or how it occurred.",
+            outboundObservation: describeCondition(out),
+            returnObservation: describeCondition(ret),
+            evidence,
+        });
+    }
 };
 
 const summarize = (material: Finding[], all: Finding[], unverified: string[]): string => {

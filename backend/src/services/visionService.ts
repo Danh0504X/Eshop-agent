@@ -1,10 +1,18 @@
-import { normalizeAnalysis, VisionAnalysisSchema, type AnalysisRecord } from "../agent/schemas";
+import {
+    normalizeAnalysis,
+    normalizeSegmentObservation,
+    SegmentObservationSchema,
+    VisionAnalysisSchema,
+    type AnalysisRecord,
+    type SegmentInspectionRecord,
+} from "../agent/schemas";
 import { env } from "../config/env";
 import type { MediaDoc } from "../models/MediaEvidence";
 import type { OrderDoc } from "../models/Order";
 import { ApiError } from "../utils/errors";
 import { aiError } from "./vision/errors";
 import { getVisionProvider } from "./vision";
+import type { VisionFrame } from "./vision/types";
 import { storage } from "./storageService";
 import { isBaselineFrame } from "./videoProcessingService";
 
@@ -20,24 +28,43 @@ export const selectFrames = (frames: Frame[], max: number): Frame[] => {
     return picked.sort((a, b) => a.index - b.index);
 };
 
-/** Analyse the extracted frames of one evidence video with the configured vision provider. */
-export const analyzeEvidence = async (
-    media: MediaDoc,
-    order: OrderDoc,
-    options: { deadlineMs?: number } = {},
-): Promise<AnalysisRecord> => {
-    if (media.status !== "processed" || media.frames.length === 0) {
-        throw new ApiError("INVALID_STATE", `Frames have not been extracted for ${media.type} evidence ${media.id}`);
-    }
-    // Baseline frames only; segment frames are analysed only when a re-inspection explicitly asks for them.
-    const selected = selectFrames(media.frames.filter(isBaselineFrame), env.MAX_FRAMES_PER_ANALYSIS);
-    const frames = await Promise.all(
-        selected.map(async (f) => ({
+const loadFrames = (frames: Frame[]): Promise<VisionFrame[]> =>
+    Promise.all(
+        frames.map(async (f) => ({
             frameId: f.frameId,
             timestampSec: f.timestampSec,
             jpeg: await storage().readBuffer(f.storageKey),
         })),
     );
+
+export interface AnalyzeOptions {
+    deadlineMs?: number;
+    /**
+     * Segment frame IDs to include in addition to the baseline frames (re-analysis after a targeted
+     * inspection). Baseline frames alone are used when omitted.
+     */
+    extraFrameIds?: string[];
+}
+
+/** Analyse the extracted frames of one evidence video with the configured vision provider. */
+export const analyzeEvidence = async (
+    media: MediaDoc,
+    order: OrderDoc,
+    options: AnalyzeOptions = {},
+): Promise<AnalysisRecord> => {
+    if (media.status !== "processed" || media.frames.length === 0) {
+        throw new ApiError("INVALID_STATE", `Frames have not been extracted for ${media.type} evidence ${media.id}`);
+    }
+    // Baseline frames, plus segment frames only when a re-inspection explicitly asks for them.
+    const baseline = selectFrames(media.frames.filter(isBaselineFrame), env.MAX_FRAMES_PER_ANALYSIS);
+    const wanted = new Set(options.extraFrameIds ?? []);
+    const extra = media.frames.filter((f) => !isBaselineFrame(f) && wanted.has(f.frameId));
+    if (extra.length !== wanted.size) {
+        throw new ApiError("VALIDATION_ERROR", `Unknown segment frames for ${media.type} evidence`, [
+            { retryable: false },
+        ]);
+    }
+    const frames = await loadFrames([...baseline, ...extra]);
 
     // product.name is required by the schema; Mongoose's inferred type just doesn't express that for nested paths.
     const product = order.product!;
@@ -81,6 +108,58 @@ export const analyzeEvidence = async (
         model: response.model,
         framesAnalyzed: frames.map((f) => ({ frameId: f.frameId, timestampSec: f.timestampSec })),
         analyzedAt: new Date().toISOString(),
+        result,
+        validationNotes: notes,
+        ...(response.usage ? { usage: response.usage } : {}),
+    };
+};
+
+/** Ask the vision provider one targeted question about the frames of one extracted segment. */
+export const inspectSegmentFrames = async (
+    media: MediaDoc,
+    order: OrderDoc,
+    segment: { segmentId: string; startSec: number; endSec: number; question: string },
+    options: { deadlineMs?: number } = {},
+): Promise<SegmentInspectionRecord> => {
+    const segmentFrames = media.frames.filter((f) => f.segmentId === segment.segmentId);
+    if (segmentFrames.length === 0) {
+        throw new ApiError("INVALID_STATE", `Segment ${segment.segmentId} has no frames`, [{ retryable: false }]);
+    }
+    const provider = getVisionProvider();
+    if (!provider.inspectSegment) {
+        throw aiError("The configured vision provider does not support targeted segment inspection", false);
+    }
+    const frames = await loadFrames(segmentFrames);
+    const response = await provider.inspectSegment({
+        evidenceType: media.type,
+        frames,
+        startSec: segment.startSec,
+        endSec: segment.endSec,
+        question: segment.question,
+        productName: order.product!.name,
+        deadlineMs: options.deadlineMs,
+        demoContext: provider.source === "demo" ? { scenario: order.demoScenario ?? undefined } : undefined,
+    });
+
+    const parsed = SegmentObservationSchema.safeParse(response.observation);
+    if (!parsed.success) {
+        throw aiError(`Segment output failed schema validation: ${parsed.error.issues[0]?.message ?? "invalid"}`, true);
+    }
+    const { result, notes } = normalizeSegmentObservation(
+        parsed.data,
+        frames.map((f) => f.frameId),
+    );
+    return {
+        segmentId: segment.segmentId,
+        mediaId: media.id,
+        evidenceType: media.type,
+        startSec: segment.startSec,
+        endSec: segment.endSec,
+        question: segment.question,
+        source: provider.source,
+        model: response.model,
+        framesAnalyzed: frames.map((f) => ({ frameId: f.frameId, timestampSec: f.timestampSec })),
+        inspectedAt: new Date().toISOString(),
         result,
         validationNotes: notes,
         ...(response.usage ? { usage: response.usage } : {}),

@@ -24,6 +24,7 @@ const sampleAnalysis = (overrides: Partial<VisionAnalysis> = {}): VisionAnalysis
             model: { value: null, status: "not_visible", frameIds: [] },
             brand: { value: null, status: "not_visible", frameIds: [] },
             serialNumber: { value: null, status: "not_visible", frameIds: [] },
+            condition: { status: "observed", damage: [], frameIds: ["RET-01"] },
         },
     ],
     totalItemCount: { value: 1, status: "observed", frameIds: ["RET-01"] },

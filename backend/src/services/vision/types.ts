@@ -1,4 +1,4 @@
-import type { VisionAnalysis } from "../../agent/schemas";
+import type { SegmentObservation, VisionAnalysis } from "../../agent/schemas";
 import type { AiUsage } from "../ai/gemini";
 
 export interface VisionFrame {
@@ -36,7 +36,27 @@ export interface VisionResponse {
     usage?: AiUsage;
 }
 
+export interface SegmentVisionRequest {
+    evidenceType: "outbound" | "return";
+    frames: VisionFrame[];
+    startSec: number;
+    endSec: number;
+    question: string;
+    productName: string;
+    deadlineMs?: number;
+    /** Only read by the demo provider. Never sent to a real AI provider. */
+    demoContext?: { scenario?: string };
+}
+
+export interface SegmentVisionResponse {
+    observation: SegmentObservation;
+    model: string | null;
+    usage?: AiUsage;
+}
+
 export interface VisionProvider {
     readonly source: "ai" | "demo";
     analyze(request: VisionRequest): Promise<VisionResponse>;
+    /** Targeted look at a few frames with one question (adaptive re-inspection). Optional per provider. */
+    inspectSegment?(request: SegmentVisionRequest): Promise<SegmentVisionResponse>;
 }

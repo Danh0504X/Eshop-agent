@@ -1,6 +1,12 @@
-import type { Part } from "@google/genai";
-import { buildVisionUserText, VISION_SYSTEM_PROMPT } from "../../agent/prompts";
-import { VisionAnalysisSchema } from "../../agent/schemas";
+import type { GenerateContentResponse, Part } from "@google/genai";
+import type { z } from "zod";
+import {
+    buildSegmentUserText,
+    buildVisionUserText,
+    SEGMENT_SYSTEM_PROMPT,
+    VISION_SYSTEM_PROMPT,
+} from "../../agent/prompts";
+import { SegmentObservationSchema, VisionAnalysisSchema } from "../../agent/schemas";
 import { env } from "../../config/env";
 import {
     assertUsableResponse,
@@ -11,15 +17,49 @@ import {
     type GeminiModelsClient,
 } from "../ai/gemini";
 import { aiError } from "./errors";
-import type { VisionProvider, VisionRequest, VisionResponse } from "./types";
+import type {
+    SegmentVisionRequest,
+    SegmentVisionResponse,
+    VisionFrame,
+    VisionProvider,
+    VisionRequest,
+    VisionResponse,
+} from "./types";
 
 const LABEL = "Vision model";
-const RESPONSE_SCHEMA = toGeminiJsonSchema(VisionAnalysisSchema);
+const ANALYSIS_SCHEMA = toGeminiJsonSchema(VisionAnalysisSchema);
+const SEGMENT_SCHEMA = toGeminiJsonSchema(SegmentObservationSchema);
+
+/** Each frame as its label followed by the inline JPEG, so the model can cite frame IDs. */
+const frameParts = (frames: VisionFrame[]): Part[] =>
+    frames.flatMap((frame) => [
+        { text: `Frame ${frame.frameId} at t=${frame.timestampSec.toFixed(1)}s` },
+        { inlineData: { mimeType: "image/jpeg", data: frame.jpeg.toString("base64") } },
+    ]);
+
+/** Parse and Zod-validate structured JSON output; any failure is a retryable AI error. */
+const parseStructured = <T>(response: GenerateContentResponse, schema: z.ZodType<T>): T => {
+    assertUsableResponse(response, LABEL);
+    const text = response.text;
+    if (!text) throw aiError(`${LABEL} returned no structured output`, true);
+    let json: unknown;
+    try {
+        json = JSON.parse(text);
+    } catch {
+        throw aiError(`${LABEL} returned malformed JSON`, true);
+    }
+    const parsed = schema.safeParse(json);
+    if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        throw aiError(`${LABEL} returned malformed output: ${issue?.path.join(".")} ${issue?.message}`, true);
+    }
+    return parsed.data;
+};
 
 /**
  * Gemini vision analysis. Sends only the selected frames (each labelled with its frame ID and timestamp)
- * plus the product checklist, and asks for JSON matching VisionAnalysisSchema. The result is still
- * re-validated by visionService; nothing here relaxes the schema.
+ * plus the product checklist or question, and asks for JSON matching the shared Zod schemas. Results are
+ * re-validated by visionService; nothing here relaxes a schema.
  */
 export class GeminiVisionProvider implements VisionProvider {
     readonly source = "ai" as const;
@@ -30,19 +70,16 @@ export class GeminiVisionProvider implements VisionProvider {
     }
 
     async analyze(request: VisionRequest): Promise<VisionResponse> {
-        const parts: Part[] = [];
-        for (const frame of request.frames) {
-            parts.push({ text: `Frame ${frame.frameId} at t=${frame.timestampSec.toFixed(1)}s` });
-            parts.push({ inlineData: { mimeType: "image/jpeg", data: frame.jpeg.toString("base64") } });
-        }
-        parts.push({
-            text: buildVisionUserText({
-                ...request.expected,
-                evidenceType: request.evidenceType,
-                frameCount: request.frames.length,
-            }),
-        });
-
+        const parts: Part[] = [
+            ...frameParts(request.frames),
+            {
+                text: buildVisionUserText({
+                    ...request.expected,
+                    evidenceType: request.evidenceType,
+                    frameCount: request.frames.length,
+                }),
+            },
+        ];
         this.client ??= createGeminiClient();
         const { response, attempts } = await callGemini(
             this.client,
@@ -52,28 +89,48 @@ export class GeminiVisionProvider implements VisionProvider {
                 config: {
                     systemInstruction: VISION_SYSTEM_PROMPT,
                     responseMimeType: "application/json",
-                    responseJsonSchema: RESPONSE_SCHEMA,
+                    responseJsonSchema: ANALYSIS_SCHEMA,
                 },
             },
             { label: LABEL, deadlineMs: request.deadlineMs },
         );
-
-        assertUsableResponse(response, LABEL);
-        const text = response.text;
-        if (!text) throw aiError(`${LABEL} returned no structured output`, true);
-        let json: unknown;
-        try {
-            json = JSON.parse(text);
-        } catch {
-            throw aiError(`${LABEL} returned malformed JSON`, true);
-        }
-        const parsed = VisionAnalysisSchema.safeParse(json);
-        if (!parsed.success) {
-            const issue = parsed.error.issues[0];
-            throw aiError(`${LABEL} returned malformed output: ${issue?.path.join(".")} ${issue?.message}`, true);
-        }
         return {
-            analysis: parsed.data,
+            analysis: parseStructured(response, VisionAnalysisSchema),
+            model: response.modelVersion ?? env.GEMINI_VISION_MODEL,
+            usage: usageOf(response, attempts),
+        };
+    }
+
+    async inspectSegment(request: SegmentVisionRequest): Promise<SegmentVisionResponse> {
+        const parts: Part[] = [
+            ...frameParts(request.frames),
+            {
+                text: buildSegmentUserText({
+                    evidenceType: request.evidenceType,
+                    startSec: request.startSec,
+                    endSec: request.endSec,
+                    question: request.question,
+                    productName: request.productName,
+                    frameCount: request.frames.length,
+                }),
+            },
+        ];
+        this.client ??= createGeminiClient();
+        const { response, attempts } = await callGemini(
+            this.client,
+            {
+                model: env.GEMINI_VISION_MODEL,
+                contents: [{ role: "user", parts }],
+                config: {
+                    systemInstruction: SEGMENT_SYSTEM_PROMPT,
+                    responseMimeType: "application/json",
+                    responseJsonSchema: SEGMENT_SCHEMA,
+                },
+            },
+            { label: LABEL, deadlineMs: request.deadlineMs },
+        );
+        return {
+            observation: parseStructured(response, SegmentObservationSchema),
             model: response.modelVersion ?? env.GEMINI_VISION_MODEL,
             usage: usageOf(response, attempts),
         };

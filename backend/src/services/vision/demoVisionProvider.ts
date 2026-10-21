@@ -1,5 +1,11 @@
 import type { VisionAnalysis } from "../../agent/schemas";
-import type { VisionProvider, VisionRequest, VisionResponse } from "./types";
+import type {
+    SegmentVisionRequest,
+    SegmentVisionResponse,
+    VisionProvider,
+    VisionRequest,
+    VisionResponse,
+} from "./types";
 
 /**
  * DEMO MODE ONLY. Returns predefined analysis results chosen by the order's demoScenario so the full
@@ -17,6 +23,8 @@ export const DEMO_SCENARIOS = [
     "mismatched_identifier",
     "low_confidence",
     "sensitive_info",
+    "product_scratch",
+    "needs_closer_look",
 ] as const;
 export type DemoScenario = (typeof DEMO_SCENARIOS)[number];
 
@@ -37,7 +45,48 @@ export class DemoVisionProvider implements VisionProvider {
                 : applyReturn(base, scenario, request, ids);
         return { analysis, model: null };
     }
+
+    /**
+     * needs_closer_look: a crack is confirmed on the return video's segment frames; every other scenario
+     * (and the outbound video) finds nothing beyond the baseline frames.
+     */
+    async inspectSegment(request: SegmentVisionRequest): Promise<SegmentVisionResponse> {
+        const ids = request.frames.map((f) => f.frameId);
+        const crack = request.demoContext?.scenario === "needs_closer_look" && request.evidenceType === "return";
+        return {
+            model: null,
+            observation: {
+                answer: crack
+                    ? "A hairline crack is visible on the front casing near the lower edge."
+                    : "These frames show nothing beyond what the baseline frames already showed.",
+                verdict: crack ? "confirmed" : "not_present",
+                observations: crack
+                    ? [
+                          {
+                              description: "Hairline crack on the front casing",
+                              certainty: "observed",
+                              frameIds: ids.slice(1, 3),
+                          },
+                      ]
+                    : [
+                          {
+                              description: "Product surface visible, no additional detail",
+                              certainty: "observed",
+                              frameIds: ids.slice(0, 1),
+                          },
+                      ],
+                imageConditions: { lighting: "good", focus: "sharp", notes: DEMO_NOTE },
+                suspectedInstructionText: [],
+                uncertaintyNotes: [DEMO_NOTE],
+                overallConfidence: crack ? 0.85 : 0.8,
+            },
+        };
+    }
 }
+
+/** True when the request includes frames added by a targeted segment extraction (e.g. RET-S1-02). */
+const isSegmentFrameId = (id: string) => /-S\d+-\d+$/.test(id);
+const hasSegmentFrames = (ids: string[]) => ids.some(isSegmentFrameId);
 
 const baseline = (request: VisionRequest, ids: string[]): VisionAnalysis => {
     const ctx = request.demoContext;
@@ -59,6 +108,7 @@ const baseline = (request: VisionRequest, ids: string[]): VisionAnalysis => {
                     : { value: null, status: "not_visible", frameIds: [] },
                 brand: { value: null, status: "not_visible", frameIds: [] },
                 serialNumber: { value: null, status: "not_visible", frameIds: [] },
+                condition: { status: "observed", damage: [], frameIds: mid },
             },
         ],
         totalItemCount: { value: request.expected.expectedQuantity, status: "observed", frameIds: mid },
@@ -198,6 +248,57 @@ const applyReturn = (
                     ],
                 },
                 privacy: { framesWithPeople: ids.slice(1, 2), framesWithPersonalData: ids.slice(0, 1) },
+            };
+        case "needs_closer_look": {
+            // Baseline frames do not show the casing clearly; once segment frames are included the crack is visible.
+            const segmentIds = ids.filter(isSegmentFrameId);
+            const condition = hasSegmentFrames(ids)
+                ? {
+                      status: "observed" as const,
+                      damage: [
+                          {
+                              kind: "crack" as const,
+                              severity: "minor" as const,
+                              description: "Hairline crack on the front casing near the lower edge",
+                              certainty: "observed" as const,
+                              frameIds: segmentIds.slice(1, 3),
+                          },
+                      ],
+                      frameIds: segmentIds,
+                  }
+                : { status: "uncertain" as const, damage: [], frameIds: mid };
+            return {
+                ...a,
+                items: [{ ...item, condition }],
+                uncertaintyNotes: hasSegmentFrames(ids)
+                    ? [DEMO_NOTE]
+                    : [
+                          DEMO_NOTE,
+                          "Front casing is partly covered by packing film; a closer look around 1-3 s may help",
+                      ],
+            };
+        }
+        case "product_scratch":
+            return {
+                ...a,
+                items: [
+                    {
+                        ...item,
+                        condition: {
+                            status: "observed",
+                            damage: [
+                                {
+                                    kind: "scratch",
+                                    severity: "minor",
+                                    description: "Thin scratch across the front casing",
+                                    certainty: "observed",
+                                    frameIds: mid.slice(0, 1),
+                                },
+                            ],
+                            frameIds: mid,
+                        },
+                    },
+                ],
             };
         default:
             return a;
