@@ -3,7 +3,7 @@ import { env } from "../config/env";
 import type { MediaDoc } from "../models/MediaEvidence";
 import type { OrderDoc } from "../models/Order";
 import { ApiError } from "../utils/errors";
-import { aiError } from "./vision/anthropicVisionProvider";
+import { aiError } from "./vision/errors";
 import { getVisionProvider } from "./vision";
 import { storage } from "./storageService";
 
@@ -76,5 +76,6 @@ export const analyzeEvidence = async (media: MediaDoc, order: OrderDoc): Promise
         analyzedAt: new Date().toISOString(),
         result,
         validationNotes: notes,
+        ...(response.usage ? { usage: response.usage } : {}),
     };
 };

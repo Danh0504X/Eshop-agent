@@ -89,6 +89,8 @@ export interface AnalysisRecord {
     result: VisionAnalysis;
     /** Problems found while validating the model output (unknown frame IDs, dropped values, ...). */
     validationNotes: string[];
+    /** Provider-reported token usage, for cost tracking. */
+    usage?: { promptTokens: number; outputTokens: number; thoughtsTokens: number };
 }
 
 /** Clamp ranges, drop references to frames that were not sent, and null out unverified serial numbers. */

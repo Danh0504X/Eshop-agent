@@ -4,13 +4,14 @@ import { buildVisionUserText, VISION_SYSTEM_PROMPT } from "../../agent/prompts";
 import { VisionAnalysisSchema } from "../../agent/schemas";
 import { env } from "../../config/env";
 import { ApiError } from "../../utils/errors";
+import { aiError } from "./errors";
 import type { VisionProvider, VisionRequest, VisionResponse } from "./types";
+
+// Re-exported for existing imports until the legacy Anthropic provider is removed.
+export { aiError };
 
 /** The subset of the SDK client this provider uses, so tests can inject a deterministic fake. */
 export type VisionClient = { beta: { messages: Pick<Anthropic["beta"]["messages"], "parse"> } };
-
-/** AI errors carry a retryable hint the agent uses to decide between retrying and escalating. */
-export const aiError = (message: string, retryable: boolean) => new ApiError("AI_ERROR", message, [{ retryable }]);
 
 export class AnthropicVisionProvider implements VisionProvider {
     readonly source = "ai" as const;

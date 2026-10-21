@@ -1,4 +1,5 @@
 import type { VisionAnalysis } from "../../agent/schemas";
+import type { AiUsage } from "../ai/gemini";
 
 export interface VisionFrame {
     frameId: string;
@@ -29,6 +30,8 @@ export interface VisionRequest {
 export interface VisionResponse {
     analysis: VisionAnalysis;
     model: string | null;
+    /** Token usage reported by the provider (absent for demo data). */
+    usage?: AiUsage;
 }
 
 export interface VisionProvider {
