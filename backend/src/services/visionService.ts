@@ -6,6 +6,7 @@ import { ApiError } from "../utils/errors";
 import { aiError } from "./vision/errors";
 import { getVisionProvider } from "./vision";
 import { storage } from "./storageService";
+import { isBaselineFrame } from "./videoProcessingService";
 
 type Frame = MediaDoc["frames"][number];
 
@@ -28,7 +29,8 @@ export const analyzeEvidence = async (
     if (media.status !== "processed" || media.frames.length === 0) {
         throw new ApiError("INVALID_STATE", `Frames have not been extracted for ${media.type} evidence ${media.id}`);
     }
-    const selected = selectFrames(media.frames, env.MAX_FRAMES_PER_ANALYSIS);
+    // Baseline frames only; segment frames are analysed only when a re-inspection explicitly asks for them.
+    const selected = selectFrames(media.frames.filter(isBaselineFrame), env.MAX_FRAMES_PER_ANALYSIS);
     const frames = await Promise.all(
         selected.map(async (f) => ({
             frameId: f.frameId,

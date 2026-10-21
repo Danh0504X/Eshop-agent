@@ -21,6 +21,23 @@ const FrameSchema = new Schema(
         brightness: { type: Number },
         sharpness: { type: Number },
         quality: { type: String, enum: ["ok", "dark", "blurry", "dark_and_blurry"], default: "ok" },
+        /** "initial" = the evenly sampled baseline set; "segment" = added later for a targeted re-inspection. */
+        origin: { type: String, enum: ["initial", "segment"], default: "initial" },
+        segmentId: { type: String },
+    },
+    { _id: false },
+);
+
+/** Provenance of a targeted extraction. Segment frames are append-only and never replace baseline frames. */
+const SegmentSchema = new Schema(
+    {
+        segmentId: { type: String, required: true },
+        startSec: { type: Number, required: true },
+        endSec: { type: Number, required: true },
+        frameIds: { type: [String], default: [] },
+        inspectionId: { type: String },
+        question: { type: String },
+        createdAt: { type: Date, default: Date.now },
     },
     { _id: false },
 );
@@ -49,6 +66,7 @@ const MediaEvidenceSchema = new Schema(
             probedAt: Date,
         },
         frames: { type: [FrameSchema], default: [] },
+        segments: { type: [SegmentSchema], default: [] },
         quality: {
             darkFrameRatio: Number,
             blurryFrameRatio: Number,

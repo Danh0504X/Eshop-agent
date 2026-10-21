@@ -95,3 +95,40 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
   - Each planner call takes about a minute on the free tier, so `AGENT_PLANNER=llm` makes inspections slow; the 15-minute budget bounds it.
   - The planner's final narrative is free text from the model; it is stored separately (`agentNarrative`) and never drives decisions.
 - **Suggested Git commit:** `feat(agent): migrate LLM planner to Gemini function calling`
+
+---
+
+## Demo support — readable agent trace on the server console
+
+- **Files changed:** `backend/src/config/env.ts`, `backend/.env.example`, `backend/src/agent/fixitAgent.ts`, `backend/src/agent/toolRegistry.ts`, `backend/src/services/ai/gemini.ts`, `backend/package.json`
+- **Files added:** `backend/src/agent/agentTrace.ts`, `backend/scripts/inspectOrder.ts`, `backend/tests/agentTrace.test.ts`
+- **Previous behavior:** the agent's steps were only visible in `inspection.agentLog` (UI / API / Compass); the server console showed HTTP lines only.
+- **New behavior:** each inspection prints a line-by-line trace prefixed with the order ID and elapsed time:
+  - `START` line with analysis mode (DEMO DATA / REAL gemini + model), planner and time budget;
+  - every planner decision `#n [STATE] planner=… -> tool` with the LLM's rationale (`why: …`), marked `(fallback)` after a fallback;
+  - every tool result `OK`/`FAIL` with a per-tool summary: frames and quality per video, each video's analysis (product, quantity, colour, model, accessories, packaging, identifiers, image conditions, confidence), comparison findings with frame IDs and timestamps, validation reasons (BLOCKING/advisory), claim and review requests;
+  - every Gemini request: model, number of frame images, per-attempt timeout, reply time, token usage and attempts, backoff retries and failures;
+  - `GUARDRAIL` / `ERROR` lines and a final `RESULT` line (status, executionLabel, plannerUsed, fallback, claim, why human review, next action).
+  - Controlled by `AGENT_TRACE` (default `true`, always silent under tests). It is a view only; `agentLog` and the audit log remain the record.
+  - `npm run demo:inspect -- <orderId>` runs an inspection from the command line (as the shop owner) and shows the trace without the UI.
+- **Compatibility impact:** none; no logic changed.
+- **Tests executed:** typecheck OK; `npm test` 134 passed, 2 skipped. New tests assert the trace content for a mismatch inspection, a missing-evidence escalation, and a Gemini planner run with timing, failure and fallback. `SHOW_TRACE=1` prints a sample.
+- **Suggested Git commit:** `feat(agent): readable console trace of the inspection workflow for demos`
+
+---
+
+## Phase 4 — Non-destructive targeted frame extraction
+
+- **Files changed:** `backend/src/services/videoProcessingService.ts`, `backend/src/models/MediaEvidence.ts`, `backend/src/services/visionService.ts`, `backend/src/config/env.ts`, `backend/.env.example`
+- **Files added:** `backend/tests/segmentFrames.test.ts`
+- **Previous behavior:** frames could only be sampled evenly across the whole video (8 per video). `extractFrames(force)` deleted all existing frames, so re-extraction after an analysis would have silently invalidated cited frame IDs.
+- **New behavior:**
+  - `extractSegmentFrames(mediaId, { startSec, endSec, count, inspectionId, question })` extracts extra frames from one time range of a processed video. **Append-only**: frames get unique IDs (`RET-S1-01`, `OUT-S2-03`), are stored under `…/segments/<S#>/`, and are appended atomically with a `segments[]` provenance record (range, frame IDs, inspection, question, time). Baseline frames and earlier segments are never modified or deleted. An identical range returns the existing frames (`cached: true`).
+  - Limits: `0 ≤ start < end ≤ duration`, span ≤ `MAX_SEGMENT_SECONDS` (10), frames ≤ `MAX_FRAMES_PER_SEGMENT` (6); violations are non-retryable `VALIDATION_ERROR`s. A failed segment extraction cleans up its files and never marks the video as failed.
+  - Each frame carries `origin: "initial" | "segment"` (+ `segmentId`). Baseline extraction and the initial `analyze_item` use baseline frames only.
+  - **Defect fixed:** `extractFrames(force)` now keeps segment frames and is refused (`INVALID_STATE`) once an inspection analysis or a claim cites frames of that video.
+- **Reason:** groundwork for the adaptive re-inspection loop (Phase 6) without invalidating existing evidence references.
+- **Compatibility impact:** existing frames without `origin` are treated as baseline. No API or agent changes; the frame image endpoint serves segment frames unchanged (same access checks).
+- **Tests executed:** typecheck OK; `npm test` 142 passed, 2 skipped; build OK. New tests (real FFmpeg): unique IDs and timestamps inside the range, baseline untouched, provenance recorded, identical request cached, S2 numbering, six invalid/oversized ranges rejected without side effects, baseline extraction required, force keeps segments, force refused when cited, initial analysis ignores segment frames, segment frame served with shop isolation.
+- **Real API test:** not applicable (no AI calls in this phase).
+- **Suggested Git commit:** `feat(video): support non-destructive targeted frame extraction`
