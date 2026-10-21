@@ -11,7 +11,14 @@ import type { AuthPrincipal } from "../types/auth";
 import { errorMessage } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
-import { createContext, knownEscalations, transition, type AgentContext } from "./agentState";
+import {
+    budgetRemaining,
+    consumeBudget,
+    createContext,
+    knownEscalations,
+    transition,
+    type AgentContext,
+} from "./agentState";
 import { trace, withTraceContext } from "./agentTrace";
 import { DeterministicPlanner } from "./planners/deterministicPlanner";
 import { GeminiPlanner } from "./planners/geminiPlanner";
@@ -180,6 +187,23 @@ const runLoop = async (
             log(ctx, "guardrail", `Agent time limit of ${env.AGENT_TIMEOUT_MS} ms reached; stopping`);
             await ctx.inspection.save();
             return undefined;
+        }
+        // LLM planner turns are AI requests too and share the inspection's request budget.
+        if (planner.kind === "llm") {
+            if (budgetRemaining(ctx).aiRequests < 1) {
+                log(
+                    ctx,
+                    "guardrail",
+                    `AI request budget of ${env.MAX_AI_REQUESTS_PER_INSPECTION} used up; stopping the planner`,
+                    {
+                        planner: planner.name,
+                        reason: "MAX_AI_REQUESTS_PER_INSPECTION reached",
+                    },
+                );
+                await ctx.inspection.save();
+                return undefined;
+            }
+            consumeBudget(ctx, { aiRequests: 1 });
         }
         let decision;
         try {

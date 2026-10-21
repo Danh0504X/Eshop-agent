@@ -2,7 +2,7 @@ import { z } from "zod";
 import { env } from "../../config/env";
 import { compareAnalyses } from "../../services/comparisonService";
 import { ApiError } from "../../utils/errors";
-import { transition } from "../agentState";
+import { invalidateVerification, transition } from "../agentState";
 import { requireOrder } from "./helpers";
 import { defineTool } from "./types";
 
@@ -24,6 +24,8 @@ export const compareItemsTool = defineTool({
         }
         const comparison = compareAnalyses(outbound, returned, order, env.CONFIDENCE_THRESHOLD);
         ctx.comparison = comparison;
+        // A new comparison must be verified again before any claim.
+        invalidateVerification(ctx);
 
         const refs = new Map<string, { frameId: string; mediaId: string; type: string; timestampSec?: number }>();
         for (const f of comparison.findings) {

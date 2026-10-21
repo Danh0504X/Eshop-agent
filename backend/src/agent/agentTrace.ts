@@ -53,6 +53,14 @@ const pct = (n: unknown) => (typeof n === "number" ? `${Math.round(n * 100)}%` :
 const reasonLines = (reasons: Array<{ code: string; message: string; blocking: boolean }> = []) =>
     reasons.map((r) => `${r.blocking ? "BLOCKING" : "advisory"} ${r.code}: ${r.message}`);
 
+const describeCondition = (condition: Data | undefined): string => {
+    if (!condition) return "-";
+    if (condition.status === "not_visible") return "surface not visible";
+    const damage: Data[] = condition.damage ?? [];
+    if (!damage.length) return `no visible damage (${condition.status})`;
+    return damage.map((d) => `${d.kind} ${d.severity} [${d.certainty}] (${(d.frameIds ?? []).join(",")})`).join("; ");
+};
+
 /** One-line headline plus detail lines describing what a tool found, per tool. */
 export const summarizeToolResult = (tool: string, data: Data): { headline: string; details: string[] } => {
     switch (tool) {
@@ -88,9 +96,10 @@ export const summarizeToolResult = (tool: string, data: Data): { headline: strin
         case "analyze_item": {
             const item = data.items?.[0];
             return {
-                headline: `${data.evidenceType} analysis (${data.source === "demo" ? "DEMO DATA" : "AI"}): contents=${data.packageContents}, confidence ${Number(data.overallConfidence ?? 0).toFixed(2)}`,
+                headline: `${data.evidenceType} ${data.reanalysis ? `RE-ANALYSIS with ${data.segmentFramesIncluded?.length ?? 0} segment frame(s)` : "analysis"} (${data.source === "demo" ? "DEMO DATA" : "AI"}): contents=${data.packageContents}, confidence ${Number(data.overallConfidence ?? 0).toFixed(2)}`,
                 details: [
                     `product ${obs(item?.productType)} | qty ${obs(data.totalItemCount)} | colour ${obs(item?.color)} | model ${obs(item?.model)}`,
+                    `product condition: ${describeCondition(item?.condition)}`,
                     `accessories: ${(data.accessories ?? []).map((a: Data) => `${a.name}=${a.status}`).join(", ") || "none listed"} | packaging: ${data.packagingCondition?.overall ?? "?"}`,
                     `identifiers seen: ${(data.visibleIdentifierKinds ?? []).map((v: Data) => v.kind).join(", ") || "none"} | image: ${data.imageConditions?.lighting} light, ${data.imageConditions?.focus}, ${data.imageConditions?.continuity}`,
                     ...(data.instructionLikeTextFound
@@ -116,6 +125,25 @@ export const summarizeToolResult = (tool: string, data: Data): { headline: strin
                     ),
                     ...(data.unverifiedAttributes?.length
                         ? [`not verifiable: ${data.unverifiedAttributes.join(", ")}`]
+                        : []),
+                ],
+            };
+        }
+        case "inspect_video_segment": {
+            const budget = data.budgetRemaining ?? {};
+            return {
+                headline: `segment ${data.segmentId} of ${data.evidenceType} ${data.startSec}-${data.endSec}s (${data.source === "demo" ? "DEMO DATA" : "AI"}): ${String(data.verdict).toUpperCase()}, confidence ${Number(data.overallConfidence ?? 0).toFixed(2)}`,
+                details: [
+                    `question: ${data.question}`,
+                    `answer: ${data.answer}`,
+                    ...(data.observations ?? []).map(
+                        (o: Data) => `observed [${o.certainty}]: ${o.description} (${(o.frameIds ?? []).join(", ")})`,
+                    ),
+                    `budget left: ${budget.segmentInspections ?? "?"} segment(s), ${budget.aiRequests ?? "?"} AI request(s), ${budget.framesAnalyzed ?? "?"} frame(s)`,
+                    ...(data.instructionLikeTextFound
+                        ? [
+                              `WARNING: ${data.instructionLikeTextFound} instruction-like text(s) found in footage (ignored)`,
+                          ]
                         : []),
                 ],
             };

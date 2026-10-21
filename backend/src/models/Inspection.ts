@@ -11,6 +11,7 @@ export const WORKFLOW_STATES = [
     "ITEM_ANALYSIS",
     "COMPARISON",
     "VERIFICATION",
+    "ADDITIONAL_INSPECTION",
     "CLAIM_DRAFT",
     "HUMAN_REVIEW",
     "COMPLETED",
@@ -68,6 +69,12 @@ const InspectionSchema = new Schema(
         analysisMode: { type: String, enum: ["real", "demo"], required: true },
         planner: { type: String, enum: ["llm", "deterministic"], required: true },
         evidenceValidation: { type: Schema.Types.Mixed },
+        /** Targeted segment inspections requested by the agent (adaptive re-inspection), in order. */
+        segmentInspections: { type: [Schema.Types.Mixed], default: [] },
+        /** Analyses replaced by a re-analysis; kept so earlier frame citations stay auditable. */
+        analysisHistory: { type: [Schema.Types.Mixed], default: [] },
+        /** AI requests, segment inspections, frames analysed and re-analyses consumed by this run. */
+        budgetUsage: { type: Schema.Types.Mixed },
         outboundAnalysis: { type: Schema.Types.Mixed },
         returnAnalysis: { type: Schema.Types.Mixed },
         comparison: { type: Schema.Types.Mixed },

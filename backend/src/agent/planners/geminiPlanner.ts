@@ -7,7 +7,7 @@ import {
     type GeminiModelsClient,
 } from "../../services/ai/gemini";
 import { aiError } from "../../services/vision/errors";
-import { ALLOWED_TOOLS, type AgentContext } from "../agentState";
+import { ALLOWED_TOOLS, budgetRemaining, type AgentContext } from "../agentState";
 import { AGENT_SYSTEM_PROMPT } from "../prompts";
 import { plannerToolSpecs } from "../toolRegistry";
 import type { Planner, PlannerDecision, ToolOutcome } from "./types";
@@ -34,6 +34,14 @@ export const agentSnapshot = (ctx: AgentContext) => ({
         humanReviewRequested: ctx.reviewTaskCreated,
     },
     pendingEscalation: ctx.pendingEscalation.map((r) => r.code),
+    unverifiedAttributes: ctx.comparison?.unverifiedAttributes ?? [],
+    segmentsInspected: ctx.segmentInspections.map((s) => ({
+        segmentId: s.segmentId,
+        evidenceType: s.evidenceType,
+        range: `${s.startSec}-${s.endSec}s`,
+        verdict: s.result.verdict,
+    })),
+    budgetRemaining: budgetRemaining(ctx),
     remainingSeconds: Math.max(0, Math.round((ctx.deadline - Date.now()) / 1000)),
 });
 

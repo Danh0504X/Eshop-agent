@@ -132,3 +132,39 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Tests executed:** typecheck OK; `npm test` 142 passed, 2 skipped; build OK. New tests (real FFmpeg): unique IDs and timestamps inside the range, baseline untouched, provenance recorded, identical request cached, S2 numbering, six invalid/oversized ranges rejected without side effects, baseline extraction required, force keeps segments, force refused when cited, initial analysis ignores segment frames, segment frame served with shop isolation.
 - **Real API test:** not applicable (no AI calls in this phase).
 - **Suggested Git commit:** `feat(video): support non-destructive targeted frame extraction`
+
+---
+
+## Phase 6a — Product condition in the vision schema and comparison
+
+- **Files changed:** `backend/src/agent/schemas.ts`, `backend/src/agent/prompts.ts`, `backend/src/services/comparisonService.ts`, `backend/src/services/vision/demoVisionProvider.ts`, `backend/src/agent/agentTrace.ts`, `backend/src/agent/tools/analyzeItem.ts`, `backend/tests/vision.test.ts`
+- **Files added:** `backend/tests/productCondition.test.ts`
+- **Previous behavior:** the analysis described product type, colour, model, quantity, accessories and packaging, but not the product's own physical condition; a cracked or scratched returned product could not become a finding.
+- **New behavior:** each item has `condition { status, damage[{kind, severity, description, certainty, frameIds}], frameIds }`. Normalisation drops damage when the product is not visible and downgrades damage without valid frame IDs to `uncertain`. The comparison adds category `product_condition_change`: observed damage in the return that was not present in an observed outbound becomes a finding (crack/broken/missing part = HIGH, other major = MEDIUM, minor = LOW) whose description states that the recordings cannot show when or how it occurred; otherwise the condition is listed as not verifiable. Demo scenarios `product_scratch` and `needs_closer_look` added.
+- **Compatibility impact:** stored analyses without `condition` still compare (treated as not verifiable).
+- **Suggested Git commit:** `feat(vision): add product condition to analysis and comparison`
+
+## Phase 6b-1 — Segment vision inspection
+
+- **Files changed:** `backend/src/services/vision/types.ts`, `backend/src/services/vision/geminiVisionProvider.ts`, `backend/src/services/vision/demoVisionProvider.ts`, `backend/src/services/visionService.ts`, `backend/src/agent/schemas.ts`, `backend/src/agent/prompts.ts`
+- **Files added:** `backend/tests/segmentVision.test.ts`
+- **New behavior:** `VisionProvider.inspectSegment` answers one specific question about a segment's frames with a structured result (`verdict confirmed | not_present | inconclusive`, grounded observations, image conditions, confidence). A `confirmed` verdict without a grounded observation becomes `inconclusive`. `analyzeEvidence(..., { extraFrameIds })` can include requested segment frames in a re-analysis; unknown frame IDs are rejected.
+- **Suggested Git commit:** `feat(vision): add focused segment inspection to vision providers`
+
+## Phase 6b-2 / 6c — Bounded adaptive re-inspection loop
+
+- **Files changed:** `backend/src/agent/agentState.ts`, `backend/src/agent/fixitAgent.ts`, `backend/src/agent/tools/analyzeItem.ts`, `backend/src/agent/tools/compareItems.ts`, `backend/src/agent/tools/index.ts`, `backend/src/agent/planners/geminiPlanner.ts`, `backend/src/agent/prompts.ts`, `backend/src/agent/agentTrace.ts`, `backend/src/models/Inspection.ts`, `backend/src/services/inspectionService.ts`, `backend/src/utils/errors.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/scripts/seed.ts`, `backend/tests/agentTools.test.ts`, `frontend/src/types.ts`, `frontend/src/components/InspectionResults.tsx`
+- **Files added:** `backend/src/agent/tools/inspectVideoSegment.ts`, `backend/tests/adaptiveLoop.test.ts`
+- **Previous behavior:** a strictly linear pass; an unclear attribute could only end in "not verifiable" or human review.
+- **New behavior:**
+  - New planner tool `inspect_video_segment {evidenceType, startSeconds, endSeconds, question, frameCount?}` (allowed in ITEM_ANALYSIS, COMPARISON, VERIFICATION, ADDITIONAL_INSPECTION). It extracts segment frames (Phase 4), asks the vision model the question, stores a `segmentInspections[]` record and moves to the new state `ADDITIONAL_INSPECTION`.
+  - **New evidence invalidates verification:** after a segment inspection, re-analysis or re-comparison the final validation is cleared, and `build_claim_pack` is not allowed in ADDITIONAL_INSPECTION; the agent must run `compare_items` and `validate_evidence` again before a claim.
+  - `analyze_item { includeSegmentFrames: true }` re-analyses a video with its unseen segment frames, only in ADDITIONAL_INSPECTION. The replaced analysis is kept in `analysisHistory`, so earlier frame references remain valid.
+  - Budgets, separate from tool retries: `MAX_SEGMENT_INSPECTIONS` (3), `MAX_REANALYSES_PER_VIDEO` (1), `MAX_TOTAL_FRAMES_ANALYZED` (40), `MAX_AI_REQUESTS_PER_INSPECTION` (16, planner turns + vision calls). Exceeding one returns non-retryable `BUDGET_EXHAUSTED`; when the AI request budget is used up the planner stops and guardrails hand over to a human. Usage is stored in `budgetUsage` and shown to the planner in `agentState.budgetRemaining`.
+  - Repeating a segment (same range, or ≥80% overlap with the same question) returns `DUPLICATE_SEGMENT`; a different segment has its own retry bucket.
+  - Agent prompt explains when to re-inspect; the console trace shows segment verdicts, observations and remaining budget, and marks RE-ANALYSIS; the UI lists segment inspections and budget usage; retrying an inspection resets segments, history and budget.
+  - Seed order `ORD-008` (`needs_closer_look`) demonstrates the loop with demo vision and the Gemini planner.
+- **Compatibility impact:** the deterministic planner never calls the new tool, so its behaviour is unchanged. Planner tool count is now 9.
+- **Tests executed:** typecheck OK; `npm test` 161 passed, 2 skipped; backend and frontend build OK. New tests (scripted Gemini planner + demo vision, no network): full loop ending in a HIGH `product_condition_change` claim citing `RET-S1-02/03`; claim refused right after new evidence; planner stopped by the AI budget; duplicate vs different segments; segment and re-analysis budgets; re-analysis rules; baseline frames intact and verification invalidated.
+- **Real API test:** not run (free-tier quota).
+- **Suggested Git commit:** `feat(agent): bounded adaptive re-inspection loop with budgets`

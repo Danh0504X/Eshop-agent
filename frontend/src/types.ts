@@ -110,6 +110,21 @@ export interface AgentLogEntry {
     durationMs?: number;
 }
 
+export interface SegmentInspection {
+    segmentId: string;
+    evidenceType: string;
+    startSec: number;
+    endSec: number;
+    question: string;
+    source: string;
+    result: {
+        answer: string;
+        verdict: "confirmed" | "not_present" | "inconclusive";
+        overallConfidence: number;
+        observations: Array<{ description: string; certainty: string; frameIds: string[] }>;
+    };
+}
+
 export interface Inspection {
     _id: string;
     orderId: string;
@@ -133,6 +148,8 @@ export interface Inspection {
         timestampSec?: number;
         imageUrl: string | null;
     }>;
+    segmentInspections?: SegmentInspection[];
+    budgetUsage?: { aiRequests: number; segmentInspections: number; framesAnalyzed: number };
     escalation?: { required: boolean; blocking: boolean; reasons: string[] };
     reviewTask?: {
         status?: string;

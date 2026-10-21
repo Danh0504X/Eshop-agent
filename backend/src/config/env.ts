@@ -71,6 +71,12 @@ const EnvSchema = z
         // Targeted re-inspection: one segment may span at most this many seconds and yield at most this many frames.
         MAX_SEGMENT_SECONDS: z.coerce.number().positive().max(60).default(10),
         MAX_FRAMES_PER_SEGMENT: z.coerce.number().int().min(1).max(12).default(6),
+        // Budgets for adaptive re-inspection, per inspection run. Separate from transport and tool-failure retries.
+        MAX_SEGMENT_INSPECTIONS: z.coerce.number().int().min(0).max(10).default(3),
+        MAX_REANALYSES_PER_VIDEO: z.coerce.number().int().min(0).max(3).default(1),
+        MAX_TOTAL_FRAMES_ANALYZED: z.coerce.number().int().min(8).max(200).default(40),
+        // All AI requests of one inspection: planner turns plus vision calls.
+        MAX_AI_REQUESTS_PER_INSPECTION: z.coerce.number().int().min(2).max(100).default(16),
         FFMPEG_PATH: z.string().optional(),
         FFPROBE_PATH: z.string().optional(),
         FFMPEG_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),

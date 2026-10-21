@@ -64,7 +64,7 @@ describe("tool registry guards", () => {
     it("exposes planner tools with object schemas and hides track_refund", () => {
         const defs = plannerToolDefinitions();
         expect(defs.map((d) => d.name)).not.toContain("track_refund");
-        expect(defs).toHaveLength(8);
+        expect(defs).toHaveLength(9);
         for (const d of defs) expect(d.input_schema.type).toBe("object");
     });
 

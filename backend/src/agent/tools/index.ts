@@ -2,6 +2,7 @@ import { analyzeItemTool } from "./analyzeItem";
 import { buildClaimPackTool } from "./buildClaimPack";
 import { compareItemsTool } from "./compareItems";
 import { extractFramesTool } from "./extractFrames";
+import { inspectVideoSegmentTool } from "./inspectVideoSegment";
 import { linkMediaTool } from "./linkMedia";
 import { lookupOrderTool } from "./lookupOrder";
 import { notifyHumanTool } from "./notifyHuman";
@@ -17,6 +18,7 @@ export const allTools: ToolDefinition<any>[] = [
     analyzeItemTool,
     compareItemsTool,
     buildClaimPackTool,
+    inspectVideoSegmentTool,
     trackRefundTool,
     notifyHumanTool,
 ];

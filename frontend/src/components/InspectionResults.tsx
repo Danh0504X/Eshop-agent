@@ -184,6 +184,52 @@ export const InspectionResults = ({ inspection }: { inspection: Inspection }) =>
                 </table>
             )}
 
+            {(inspection.segmentInspections?.length ?? 0) > 0 && (
+                <>
+                    <h4>Additional segment inspections ({inspection.segmentInspections!.length})</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Segment</th>
+                                <th>Question</th>
+                                <th>Verdict</th>
+                                <th>Answer / observations</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {inspection.segmentInspections!.map((s) => (
+                                <tr key={`${s.evidenceType}-${s.segmentId}`}>
+                                    <td className="small">
+                                        {s.segmentId} {s.evidenceType} {s.startSec}-{s.endSec}s
+                                        <div className="muted small">{s.source}</div>
+                                    </td>
+                                    <td>{s.question}</td>
+                                    <td>
+                                        <Badge value={s.result.verdict} />
+                                        <div className="muted small">{s.result.overallConfidence.toFixed(2)}</div>
+                                    </td>
+                                    <td>
+                                        {s.result.answer}
+                                        {s.result.observations.map((o, i) => (
+                                            <div key={i} className="muted small">
+                                                [{o.certainty}] {o.description} ({o.frameIds.join(", ")})
+                                            </div>
+                                        ))}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    {inspection.budgetUsage && (
+                        <p className="muted small">
+                            Budget used: {inspection.budgetUsage.aiRequests} AI request(s),{" "}
+                            {inspection.budgetUsage.segmentInspections} segment inspection(s),{" "}
+                            {inspection.budgetUsage.framesAnalyzed} frame(s)
+                        </p>
+                    )}
+                </>
+            )}
+
             {inspection.frameReferences.length > 0 && (
                 <details>
                     <summary>Supporting frames ({inspection.frameReferences.length})</summary>
