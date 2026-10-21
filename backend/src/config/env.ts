@@ -26,7 +26,12 @@ const EnvSchema = z
         JWT_EXPIRES_IN: z.string().default("8h"),
 
         DEMO_MODE: bool(false),
-        AI_PROVIDER: z.enum(["anthropic", "demo"]).default("anthropic"),
+        AI_PROVIDER: z.enum(["gemini", "anthropic", "demo"]).default("gemini"),
+        GEMINI_API_KEY: z.string().optional(),
+        // Configurable because Gemini model availability changes; run `npm run gemini:models` to list yours.
+        GEMINI_VISION_MODEL: z.string().default("gemini-3.8-flash"),
+        GEMINI_PLANNER_MODEL: z.string().default("gemini-3.8-flash"),
+        // Legacy Anthropic settings, kept until the Gemini migration is verified end to end.
         AI_API_KEY: z.string().optional(),
         AI_MODEL: z.string().default("claude-opus-5-5"),
         AI_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("high"),
@@ -72,6 +77,14 @@ const EnvSchema = z
         LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
     })
     .superRefine((env, ctx) => {
+        if (!env.DEMO_MODE && env.AI_PROVIDER === "gemini" && !env.GEMINI_API_KEY) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["GEMINI_API_KEY"],
+                message:
+                    "GEMINI_API_KEY is required when AI_PROVIDER=gemini and DEMO_MODE=false. Create a key at https://aistudio.google.com, or set DEMO_MODE=true to run with predefined (non-AI) demo results.",
+            });
+        }
         if (!env.DEMO_MODE && env.AI_PROVIDER === "anthropic" && !env.AI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
             ctx.addIssue({
                 code: "custom",
@@ -94,6 +107,16 @@ export type AppConfig = z.infer<typeof EnvSchema> & {
     uploadDirAbs: string;
     /** Effective analysis mode: "demo" whenever DEMO_MODE is on or AI_PROVIDER=demo. */
     aiMode: "real" | "demo";
+    /** Which real provider is active (null in demo mode). */
+    activeProvider: "gemini" | "anthropic" | null;
+};
+
+/** Model names in use, for health checks and logs. Never includes credentials. */
+export const activeModels = (config: AppConfig): { vision: string; planner: string } | null => {
+    if (config.activeProvider === "gemini")
+        return { vision: config.GEMINI_VISION_MODEL, planner: config.GEMINI_PLANNER_MODEL };
+    if (config.activeProvider === "anthropic") return { vision: config.AI_MODEL, planner: config.AI_MODEL };
+    return null;
 };
 
 export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -103,12 +126,14 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
         throw new Error(`Invalid configuration. Fix your .env file (see .env.example):\n${lines.join("\n")}`);
     }
     const values = parsed.data;
+    const demo = values.DEMO_MODE || values.AI_PROVIDER === "demo";
     return {
         ...values,
         AI_API_KEY: values.AI_API_KEY ?? source.ANTHROPIC_API_KEY,
         IS_PRODUCTION: values.NODE_ENV === "production",
         uploadDirAbs: path.resolve(values.UPLOAD_DIR),
-        aiMode: values.DEMO_MODE || values.AI_PROVIDER === "demo" ? "demo" : "real",
+        aiMode: demo ? "demo" : "real",
+        activeProvider: demo ? null : (values.AI_PROVIDER as "gemini" | "anthropic"),
     };
 }
 

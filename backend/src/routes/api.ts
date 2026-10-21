@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import swaggerUi from "swagger-ui-express";
-import { env } from "../config/env";
+import { activeModels, env } from "../config/env";
 import { openApiDocument } from "../docs/openapi";
 import authRoute from "./authRoute";
 import claimRoute from "./claimRoute";
@@ -13,12 +13,15 @@ const router = express.Router();
 
 router.get("/health", (_request, response) => {
     const dbUp = mongoose.connection.readyState === 1;
+    const models = activeModels(env);
     response.status(dbUp ? 200 : 503).json({
         status: dbUp ? "ok" : "degraded",
         database: dbUp ? "connected" : "disconnected",
         // Surfaced so the UI and operators always know whether results are real AI analysis or demo data.
         analysisMode: env.aiMode,
-        aiModel: env.aiMode === "real" ? env.AI_MODEL : null,
+        aiProvider: env.activeProvider,
+        aiModel: models?.vision ?? null,
+        plannerModel: models && env.AGENT_PLANNER === "llm" ? models.planner : null,
         planner: env.aiMode === "real" ? env.AGENT_PLANNER : "deterministic",
     });
 });

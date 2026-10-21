@@ -13,12 +13,15 @@
         "seed": "tsx scripts/seed.ts",
         "db:local": "tsx scripts/localMongo.ts",
         "retention": "tsx scripts/retention.ts",
-        "format": "prettier --write \"src/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\""
+        "format": "prettier --write \"src/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\"",
+        "gemini:models": "tsx scripts/geminiModels.ts",
+        "test:gemini": "vitest run tests/integration"
     },
     "license": "UNLICENSED",
     "type": "module",
     "dependencies": {
         "@anthropic-ai/sdk": "^0.135.0",
+        "@google/genai": "^2.30.0",
         "bcryptjs": "^3.0.3",
         "cookie-parser": "^1.4.7",
         "cors": "^2.8.6",

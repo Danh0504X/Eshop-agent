@@ -2,7 +2,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import app from "./app";
 import { connectDB } from "./config/db";
-import { env } from "./config/env";
+import { activeModels, env } from "./config/env";
 import { recoverInterruptedInspections } from "./services/inspectionQueue";
 
 const startServer = async () => {
@@ -11,10 +11,11 @@ const startServer = async () => {
     await recoverInterruptedInspections();
     app.listen(env.PORT, () => {
         console.info(`Server is running on port ${env.PORT} [${env.NODE_ENV}]`);
+        const models = activeModels(env);
         console.info(
-            env.aiMode === "demo"
+            env.aiMode === "demo" || !models
                 ? "Analysis mode: DEMO - predefined results, NOT real AI analysis"
-                : `Analysis mode: REAL AI (${env.AI_MODEL}, planner=${env.AGENT_PLANNER})`,
+                : `Analysis mode: REAL ${env.activeProvider?.toUpperCase()} (vision=${models.vision}, planner=${env.AGENT_PLANNER}${env.AGENT_PLANNER === "llm" ? `:${models.planner}` : ""})`,
         );
     });
 };
