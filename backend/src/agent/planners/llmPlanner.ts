@@ -17,6 +17,7 @@ const MAX_RESULT_CHARS = 12_000;
  */
 export class LlmPlanner implements Planner {
     readonly kind = "llm" as const;
+    readonly name = "anthropic" as const;
     private readonly client: PlannerClient;
     private readonly messages: Anthropic.Beta.BetaMessageParam[] = [];
 

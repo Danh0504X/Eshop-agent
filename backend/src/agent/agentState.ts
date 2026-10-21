@@ -63,6 +63,8 @@ export interface AgentContext {
     deadline: number;
     /** Epoch ms the currently running tool must finish by: min(deadline, tool start + AGENT_TOOL_TIMEOUT_MS). */
     toolDeadline?: number;
+    /** Planner currently proposing actions; recorded on every tool log entry. */
+    plannerName?: "gemini" | "anthropic" | "deterministic";
 }
 
 export const createContext = (inspection: InspectionDoc, principal: AuthPrincipal): AgentContext => ({

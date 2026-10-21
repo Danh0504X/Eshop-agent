@@ -8,6 +8,7 @@ import type { Planner, PlannerDecision, PlannedCall, ToolOutcome } from "./types
  */
 export class DeterministicPlanner implements Planner {
     readonly kind = "deterministic" as const;
+    readonly name = "deterministic" as const;
     private counter = 0;
 
     private call(name: string, args: Record<string, unknown> = {}): PlannerDecision {

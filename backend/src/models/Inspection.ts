@@ -35,6 +35,14 @@ const AgentLogSchema = new Schema(
         error: String,
         message: String,
         durationMs: Number,
+        /** Which planner made (or would have made) this decision: gemini | anthropic | deterministic. */
+        planner: String,
+        selectedTools: { type: [String], default: undefined },
+        /** The planner's own one-line justification for its tool choice (LLM planners only). */
+        rationale: String,
+        fallbackUsed: Boolean,
+        /** Why a fallback or human review happened. */
+        reason: String,
     },
     { _id: false },
 );
@@ -93,6 +101,10 @@ const InspectionSchema = new Schema(
         /** Free-text closing message from the LLM planner, shown separately and never used for decisions. */
         agentNarrative: { type: String },
         plannerFallback: { type: Boolean, default: false },
+        /** Planner that produced the final decisions (after any fallback). */
+        plannerUsed: { type: String, enum: ["gemini", "anthropic", "deterministic"] },
+        /** One-glance provenance label for UI, logs and reports. */
+        executionLabel: { type: String, enum: ["REAL_GEMINI", "REAL_ANTHROPIC", "DEMO", "DETERMINISTIC_FALLBACK"] },
         recommendedAction: { type: String },
         claimId: { type: Schema.Types.ObjectId, ref: "Claim" },
         agentLog: { type: [AgentLogSchema], default: [] },

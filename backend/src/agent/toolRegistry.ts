@@ -17,13 +17,29 @@ const registry = new Map<ToolName, ToolDefinition<unknown>>(
 export const getTool = (name: string): ToolDefinition<unknown> | undefined => registry.get(name as ToolName);
 
 /** JSON Schema tool definitions for the LLM planner (only planner-visible tools). */
-export const plannerToolDefinitions = () =>
+export interface PlannerToolSpec {
+    name: ToolName;
+    description: string;
+    /** JSON Schema generated from the same Zod schema executeTool validates against. */
+    parameters: Record<string, unknown>;
+}
+
+/** Provider-neutral descriptions of the tools a planner may call (planner-visible tools only). */
+export const plannerToolSpecs = (): PlannerToolSpec[] =>
     [...registry.values()]
         .filter((t) => t.plannerVisible)
         .map((t) => {
             const { $schema: _ignored, ...schema } = z.toJSONSchema(t.schema) as Record<string, unknown>;
-            return { name: t.name, description: t.description, input_schema: { type: "object" as const, ...schema } };
+            return { name: t.name, description: t.description, parameters: { type: "object", ...schema } };
         });
+
+/** Anthropic tool definitions (legacy planner). */
+export const plannerToolDefinitions = () =>
+    plannerToolSpecs().map((t) => ({
+        name: t.name,
+        description: t.description,
+        input_schema: { ...t.parameters, type: "object" as const },
+    }));
 
 const fail = (code: string, message: string, retryable = false, details?: unknown): ToolResult => ({
     ok: false,
@@ -110,6 +126,7 @@ export const executeTool = async (ctx: AgentContext, name: string, rawArgs: unkn
     const durationMs = Date.now() - started;
     ctx.inspection.agentLog.push({
         kind: "tool_call",
+        planner: ctx.plannerName,
         attempt: ctx.inspection.attempt,
         iteration: ctx.iteration,
         state: ctx.state,

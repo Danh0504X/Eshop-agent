@@ -367,7 +367,7 @@ describe("FixIt agent with the LLM planner (mocked client)", () => {
         spyProvider();
         overrideEnv({ AGENT_TIMEOUT_MS: 800 });
         const { inspection } = await setup({ planner: "llm" });
-        const hanging: Planner = { kind: "llm", next: () => new Promise(() => {}) };
+        const hanging: Planner = { kind: "llm", name: "gemini", next: () => new Promise(() => {}) };
         const started = Date.now();
         const result = await runInspection(inspection.id, { planner: hanging });
 

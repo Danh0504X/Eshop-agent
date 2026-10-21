@@ -13,9 +13,23 @@ import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { createContext, knownEscalations, transition, type AgentContext } from "./agentState";
 import { DeterministicPlanner } from "./planners/deterministicPlanner";
+import { GeminiPlanner } from "./planners/geminiPlanner";
 import { LlmPlanner } from "./planners/llmPlanner";
 import type { Planner, ToolOutcome } from "./planners/types";
 import { executeTool } from "./toolRegistry";
+
+/** The LLM planner for the active provider, or the fixed workflow when the inspection was created for it. */
+const createPlanner = (inspection: InspectionDoc): Planner => {
+    if (inspection.planner !== "llm") return new DeterministicPlanner();
+    return env.activeProvider === "anthropic" ? new LlmPlanner() : new GeminiPlanner();
+};
+
+/** One-glance provenance: demo data, real AI end to end, or a real run that fell back to the fixed workflow. */
+const executionLabelFor = (inspection: InspectionDoc) => {
+    if (inspection.analysisMode === "demo") return "DEMO" as const;
+    if (inspection.plannerFallback) return "DETERMINISTIC_FALLBACK" as const;
+    return env.activeProvider === "anthropic" ? ("REAL_ANTHROPIC" as const) : ("REAL_GEMINI" as const);
+};
 
 export interface RunOptions {
     /** Test hook: inject a planner. */
@@ -68,12 +82,13 @@ export const runInspection = async (inspectionId: string, options: RunOptions = 
         const principal = await principalFor(inspection);
         ctx = createContext(inspection, principal);
         inspection.set({ status: "processing", startedAt: new Date(), finishedAt: undefined, error: undefined });
-        let planner: Planner =
-            options.planner ?? (inspection.planner === "llm" ? new LlmPlanner() : new DeterministicPlanner());
+        let planner: Planner = options.planner ?? createPlanner(inspection);
+        ctx.plannerName = planner.name;
         log(
             ctx,
             "note",
-            `Attempt ${inspection.attempt} started. Analysis mode: ${inspection.analysisMode}. Planner: ${planner.kind}.`,
+            `Attempt ${inspection.attempt} started. Analysis mode: ${inspection.analysisMode}. planner=${planner.name}.`,
+            { planner: planner.name, fallbackUsed: false },
         );
         inspection.stateHistory.push({
             state: "RECEIVED",
@@ -135,13 +150,23 @@ const runLoop = async (
             // The planner shares the inspection budget; it cannot outlive the deadline.
             decision = await withTimeout(planner.next(ctx, last), remainingMs, "planner");
         } catch (error) {
-            log(ctx, "error", `Planner (${planner.kind}) failed: ${errorMessage(error)}`);
+            const failedName = planner.name;
+            log(ctx, "error", `planner=${failedName} failed: ${errorMessage(error)}`, {
+                planner: failedName,
+                reason: errorMessage(error),
+            });
             if (planner.kind === "llm") {
-                // Fall back to the fixed workflow; tools still enforce every rule.
+                // Fall back to the fixed workflow; tools still enforce every rule. Every later decision is
+                // labelled planner=deterministic so it is never mistaken for an LLM decision.
                 planner = new DeterministicPlanner();
                 swap(planner);
+                ctx.plannerName = planner.name;
                 ctx.inspection.plannerFallback = true;
-                log(ctx, "guardrail", "Switched to the deterministic planner after an LLM planner failure");
+                log(ctx, "guardrail", `Switched to the deterministic planner after a ${failedName} planner failure`, {
+                    planner: planner.name,
+                    fallbackUsed: true,
+                    reason: errorMessage(error),
+                });
                 await ctx.inspection.save();
                 last = [];
                 continue;
@@ -149,13 +174,22 @@ const runLoop = async (
             throw error;
         }
 
+        const fallbackUsed = Boolean(ctx.inspection.plannerFallback);
         if (decision.type === "finish") {
-            log(ctx, "planner", "Planner finished", { result: { text: decision.text.slice(0, 2000) } });
+            log(ctx, "planner", `planner=${planner.name} finished`, {
+                planner: planner.name,
+                fallbackUsed,
+                rationale: decision.text.slice(0, 2000) || undefined,
+            });
             await ctx.inspection.save();
             return decision.text || undefined;
         }
-        log(ctx, "planner", `Planner requested: ${decision.calls.map((c) => c.name).join(", ")}`, {
-            result: decision.text ? { text: decision.text.slice(0, 1000) } : undefined,
+        const selectedTools = decision.calls.map((c) => c.name);
+        log(ctx, "planner", `planner=${planner.name} selected ${selectedTools.join(", ")}`, {
+            planner: planner.name,
+            selectedTools,
+            fallbackUsed,
+            rationale: decision.text ? decision.text.slice(0, 1000) : undefined,
         });
         last = [];
         for (const call of decision.calls) {
@@ -168,7 +202,7 @@ const runLoop = async (
 };
 
 const escalate = async (ctx: AgentContext, reasons: EscalationReason[], note: string) => {
-    log(ctx, "guardrail", note);
+    log(ctx, "guardrail", note, { reason: reasons.map((r) => `${r.code}: ${r.message}`).join("; ") });
     await createReviewTask({
         inspection: ctx.inspection,
         principal: ctx.principal,
@@ -269,8 +303,21 @@ const finalize = async (ctx: AgentContext, narrative: string | undefined): Promi
         summary: buildSummary(current, claimOk),
         recommendedAction: recommendAction(current, status, claimOk),
         agentNarrative: narrative?.slice(0, 4000),
+        plannerUsed: ctx.plannerName,
+        executionLabel: executionLabelFor(current),
         finishedAt: new Date(),
     });
+    if (status === "needs_review") {
+        // The single place an auditor can read why a human was brought in, whoever triggered it.
+        current.agentLog.push({
+            kind: "note",
+            message: "HUMAN_REVIEW",
+            attempt: current.attempt,
+            planner: ctx.plannerName,
+            fallbackUsed: Boolean(current.plannerFallback),
+            reason: (current.reviewTask?.reasons ?? []).join("; ") || current.reviewTask?.reason,
+        });
+    }
     if (status === "completed") {
         current.stateHistory.push({
             state: "COMPLETED",
