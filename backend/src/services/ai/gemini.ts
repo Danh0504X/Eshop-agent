@@ -1,6 +1,16 @@
-import { ApiError as GenAiApiError, FinishReason, GoogleGenAI, type GenerateContentResponse } from "@google/genai";
+import {
+    ApiError as GenAiApiError,
+    FinishReason,
+    GoogleGenAI,
+    ThinkingLevel,
+    type GenerateContentParameters,
+    type GenerateContentResponse,
+} from "@google/genai";
 import { z } from "zod";
 import { env } from "../../config/env";
+import { ApiError } from "../../utils/errors";
+import { logger } from "../../utils/logger";
+import { retryWithBackoff, RetryExhaustedError, type RetryDecision } from "../../utils/retry";
 import { aiError } from "../vision/errors";
 
 /**
@@ -20,12 +30,15 @@ export interface AiUsage {
     promptTokens: number;
     outputTokens: number;
     thoughtsTokens: number;
+    /** HTTP attempts made for this one logical request (1 = no transport retry). */
+    apiAttempts: number;
 }
 
-export const usageOf = (response: GenerateContentResponse): AiUsage => ({
+export const usageOf = (response: GenerateContentResponse, apiAttempts = 1): AiUsage => ({
     promptTokens: response.usageMetadata?.promptTokenCount ?? 0,
     outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
     thoughtsTokens: response.usageMetadata?.thoughtsTokenCount ?? 0,
+    apiAttempts,
 });
 
 /** Finish reasons that mean the model declined or was blocked: retrying the same request will not help. */
@@ -65,8 +78,41 @@ const googleMessage = (error: GenAiApiError): string => {
     }
 };
 
+/**
+ * Server-requested wait, from Google's RetryInfo detail (`"retryDelay": "17s"`) or a "retry in 17.2s" hint.
+ * Returns undefined when the server did not say.
+ */
+export const parseRetryDelayMs = (error: GenAiApiError): number | undefined => {
+    try {
+        const body = JSON.parse(error.message) as { error?: { details?: Array<Record<string, unknown>> } };
+        const info = body.error?.details?.find((d) => String(d["@type"] ?? "").endsWith("google.rpc.RetryInfo"));
+        const delay = typeof info?.retryDelay === "string" ? /^([\d.]+)s$/.exec(info.retryDelay) : null;
+        if (delay) return Math.round(Number(delay[1]) * 1000);
+    } catch {
+        /* not a JSON body */
+    }
+    const hint = /retry in ([\d.]+)\s*s/i.exec(error.message);
+    return hint ? Math.round(Number(hint[1]) * 1000) : undefined;
+};
+
+/** Only rate limiting and temporary unavailability are retried at the transport level. */
+export const classifyTransient = (error: unknown): RetryDecision =>
+    error instanceof GenAiApiError && (error.status === 429 || error.status === 503)
+        ? { retry: true, retryAfterMs: parseRetryDelayMs(error) }
+        : { retry: false };
+
 /** Map SDK / network failures onto AI errors with a retryable hint. */
 export const mapGeminiError = (error: unknown, label: string): ApiErrorLike => {
+    if (error instanceof ApiError) return error;
+    if (error instanceof RetryExhaustedError) {
+        // Backoff already ran. Marking this final stops the agent from compounding retries; it escalates instead.
+        const status = error.cause instanceof GenAiApiError ? error.cause.status : "unknown";
+        const what = status === 429 ? "rate limit or quota" : "service unavailable";
+        return aiError(
+            `${label}: Gemini ${what} (${status}) persisted after ${error.attempts} attempt(s); ${error.reason === "deadline" ? "inspection time budget exhausted" : "retry limit reached"}`,
+            false,
+        );
+    }
     if (error instanceof GenAiApiError) {
         const status = error.status;
         if (status === 429) return aiError(`${label}: Gemini rate limit or quota reached`, true);
@@ -104,5 +150,68 @@ export const toGeminiJsonSchema = (schema: z.ZodType): Record<string, unknown> =
     return rest;
 };
 
-/** Per-request transport options. SDK-level retries stay off: the agent's tool registry owns bounded retries. */
-export const requestOptions = () => ({ httpOptions: { timeout: env.AI_TIMEOUT_MS } });
+/** Keep a little headroom so a request never ends after the caller's deadline. */
+const DEADLINE_SAFETY_MS = 2_000;
+/** Below this, a request is unlikely to finish; fail fast instead of starting it. */
+export const MIN_REQUEST_MS = 5_000;
+
+/** Per-attempt timeout: AI_TIMEOUT_MS, shortened to fit the remaining time budget. */
+export const requestTimeoutMs = (deadlineMs: number | undefined, label: string, now = Date.now()): number => {
+    if (deadlineMs === undefined) return env.AI_TIMEOUT_MS;
+    const remaining = deadlineMs - now - DEADLINE_SAFETY_MS;
+    if (remaining < MIN_REQUEST_MS)
+        throw aiError(`${label}: inspection time budget exhausted before calling Gemini`, false);
+    return Math.min(env.AI_TIMEOUT_MS, remaining);
+};
+
+/** Thinking level verified against the configured model (see .env.example); unset = model default. */
+const thinkingConfig = () =>
+    env.GEMINI_THINKING_LEVEL ? { thinkingConfig: { thinkingLevel: ThinkingLevel[env.GEMINI_THINKING_LEVEL] } } : {};
+
+export interface GeminiCallOptions {
+    /** Names the caller in errors and logs ("Vision model", "Planner"). */
+    label: string;
+    /** Epoch ms the whole operation must finish by (tool / inspection budget). */
+    deadlineMs?: number;
+}
+
+/**
+ * The single entry point for Gemini requests: per-attempt timeout bounded by the deadline, exponential backoff
+ * with jitter for 429/503 (honouring RetryInfo), thinking level, and error mapping. SDK-level retries stay off.
+ */
+export const callGemini = async (
+    client: GeminiModelsClient,
+    params: GenerateContentParameters,
+    options: GeminiCallOptions,
+): Promise<{ response: GenerateContentResponse; attempts: number }> => {
+    try {
+        const { value, attempts } = await retryWithBackoff(
+            () =>
+                client.models.generateContent({
+                    ...params,
+                    config: {
+                        ...thinkingConfig(),
+                        ...params.config,
+                        httpOptions: { timeout: requestTimeoutMs(options.deadlineMs, options.label) },
+                    },
+                }),
+            {
+                maxAttempts: env.AI_RETRY_MAX_ATTEMPTS,
+                baseDelayMs: env.AI_RETRY_BASE_DELAY_MS,
+                maxDelayMs: env.AI_RETRY_MAX_DELAY_MS,
+                deadline: options.deadlineMs === undefined ? undefined : options.deadlineMs - MIN_REQUEST_MS,
+                classify: classifyTransient,
+                onRetry: ({ attempt, delayMs, error }) =>
+                    logger.warn("Gemini transient error; backing off", {
+                        label: options.label,
+                        attempt,
+                        delayMs,
+                        status: error instanceof GenAiApiError ? error.status : undefined,
+                    }),
+            },
+        );
+        return { response: value, attempts };
+    } catch (error) {
+        throw mapGeminiError(error, options.label);
+    }
+};

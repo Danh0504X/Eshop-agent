@@ -24,7 +24,11 @@ import {
 } from "./helpers";
 
 let owner: TestUser;
-const defaults = { AGENT_MAX_ITERATIONS: env.AGENT_MAX_ITERATIONS, AGENT_MAX_TOOL_RETRIES: env.AGENT_MAX_TOOL_RETRIES };
+const defaults = {
+    AGENT_MAX_ITERATIONS: env.AGENT_MAX_ITERATIONS,
+    AGENT_MAX_TOOL_RETRIES: env.AGENT_MAX_TOOL_RETRIES,
+    AGENT_TIMEOUT_MS: env.AGENT_TIMEOUT_MS,
+};
 
 beforeAll(async () => {
     await connectTestDb();
@@ -357,5 +361,20 @@ describe("FixIt agent with the LLM planner (mocked client)", () => {
         expect(create).toHaveBeenCalledTimes(4);
         expect(result.agentLog.some((l) => /Iteration limit/.test(l.message ?? ""))).toBe(true);
         expect(result.status).toBe("needs_review");
+    });
+
+    it("bounds a hanging planner by the inspection deadline, records the fallback, and escalates", async () => {
+        spyProvider();
+        overrideEnv({ AGENT_TIMEOUT_MS: 800 });
+        const { inspection } = await setup({ planner: "llm" });
+        const hanging: Planner = { kind: "llm", next: () => new Promise(() => {}) };
+        const started = Date.now();
+        const result = await runInspection(inspection.id, { planner: hanging });
+
+        expect(Date.now() - started).toBeLessThan(5_000);
+        expect(result.plannerFallback).toBe(true);
+        expect(result.agentLog.some((l) => /Agent time limit/.test(l.message ?? ""))).toBe(true);
+        expect(result.status).toBe("needs_review");
+        expect(result.escalation?.reasons).toContain("WORKFLOW_ERROR");
     });
 });

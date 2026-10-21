@@ -1,4 +1,5 @@
 import type { AnalysisRecord } from "./schemas";
+import { env } from "../config/env";
 import type { InspectionDoc, WorkflowState } from "../models/Inspection";
 import type { MediaDoc, MediaType } from "../models/MediaEvidence";
 import type { OrderDoc } from "../models/Order";
@@ -58,6 +59,10 @@ export interface AgentContext {
     reviewTaskCreated: boolean;
     attempts: Record<string, number>;
     iteration: number;
+    /** Epoch ms the whole inspection must finish by (AGENT_TIMEOUT_MS from the start of the run). */
+    deadline: number;
+    /** Epoch ms the currently running tool must finish by: min(deadline, tool start + AGENT_TOOL_TIMEOUT_MS). */
+    toolDeadline?: number;
 }
 
 export const createContext = (inspection: InspectionDoc, principal: AuthPrincipal): AgentContext => ({
@@ -71,6 +76,7 @@ export const createContext = (inspection: InspectionDoc, principal: AuthPrincipa
     reviewTaskCreated: false,
     attempts: {},
     iteration: 0,
+    deadline: Date.now() + env.AGENT_TIMEOUT_MS,
 });
 
 /** All escalation reasons known so far, de-duplicated by code + evidence type. */

@@ -206,3 +206,63 @@ describe("tool workflow", () => {
         });
     });
 });
+
+describe("inspection time budget", () => {
+    const readyForAnalysis = async () => {
+        const { ctx, order } = await newContext();
+        await run(ctx, "lookup_order", { orderId: order.orderId });
+        await run(ctx, "validate_evidence");
+        await run(ctx, "extract_frames", { evidenceType: "outbound" });
+        await run(ctx, "extract_frames", { evidenceType: "return" });
+        return ctx;
+    };
+
+    it("cuts a tool off at the inspection deadline even when its own timeout is longer", async () => {
+        setVisionProvider({ source: "ai", analyze: () => new Promise(() => {}) });
+        const ctx = await readyForAnalysis();
+        ctx.deadline = Date.now() + 300; // tool timeout stays at the 5-minute default
+        const started = Date.now();
+        expect(await run(ctx, "analyze_item", { evidenceType: "outbound" })).toMatchObject({
+            ok: false,
+            error: { code: "TIMEOUT" },
+        });
+        expect(Date.now() - started).toBeLessThan(2_000);
+        expect(ctx.toolDeadline).toBeUndefined();
+    });
+
+    it("does not start a tool once the budget is used up", async () => {
+        let calls = 0;
+        setVisionProvider({
+            source: "ai",
+            analyze: async () => {
+                calls++;
+                throw new Error("should not run");
+            },
+        });
+        const ctx = await readyForAnalysis();
+        ctx.deadline = Date.now() - 1;
+        expect(await run(ctx, "analyze_item", { evidenceType: "outbound" })).toMatchObject({
+            ok: false,
+            error: { code: "TIMEOUT", message: expect.stringMatching(/budget exhausted/) },
+        });
+        expect(calls).toBe(0);
+    });
+
+    it("passes the tool deadline (bounded by the inspection deadline) to the vision provider", async () => {
+        const seen: Array<number | undefined> = [];
+        const demo = new DemoVisionProvider();
+        setVisionProvider({
+            source: "demo",
+            analyze: (req) => {
+                seen.push(req.deadlineMs);
+                return demo.analyze(req);
+            },
+        });
+        const ctx = await readyForAnalysis();
+        ctx.deadline = Date.now() + 60_000;
+        await run(ctx, "analyze_item", { evidenceType: "outbound" });
+        expect(seen[0]).toBeDefined();
+        expect(seen[0]!).toBeLessThanOrEqual(ctx.deadline);
+        expect(seen[0]!).toBeGreaterThan(Date.now());
+    });
+});

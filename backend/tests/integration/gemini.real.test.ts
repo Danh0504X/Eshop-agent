@@ -26,7 +26,6 @@ describe.skipIf(!enabled)("Gemini vision (real API)", () => {
         overrideEnv({
             GEMINI_API_KEY: process.env.GEMINI_API_KEY,
             ...(process.env.GEMINI_VISION_MODEL ? { GEMINI_VISION_MODEL: process.env.GEMINI_VISION_MODEL } : {}),
-            AI_TIMEOUT_MS: 120_000,
         });
         setVisionProvider(new GeminiVisionProvider());
     });
@@ -52,5 +51,5 @@ describe.skipIf(!enabled)("Gemini vision (real API)", () => {
         expect(record.result.overallConfidence).toBeGreaterThanOrEqual(0);
         expect(cited.every((id) => sent.has(id))).toBe(true);
         console.info("Gemini model:", record.model, "usage:", record.usage, "contents:", record.result.packageContents);
-    }, 180_000);
+    }, 420_000);
 });

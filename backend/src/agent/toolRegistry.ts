@@ -88,11 +88,20 @@ export const executeTool = async (ctx: AgentContext, name: string, rawArgs: unkn
                 result = fail("RETRY_LIMIT", `${name} already failed ${attempt - 1} time(s); escalate to a human`);
             } else {
                 ctx.attempts[key] = attempt;
+                // A tool never runs past its own timeout or the remaining inspection budget, whichever is sooner.
+                ctx.toolDeadline = Math.min(ctx.deadline, Date.now() + env.AGENT_TOOL_TIMEOUT_MS);
+                const remainingMs = ctx.toolDeadline - Date.now();
                 try {
-                    const data = await withTimeout(tool.handler(parsed.data, ctx), env.AGENT_TOOL_TIMEOUT_MS, name);
-                    result = { ok: true, data };
+                    if (remainingMs <= 0) {
+                        result = fail("TIMEOUT", `Inspection time budget exhausted before ${name} could run`);
+                    } else {
+                        const data = await withTimeout(tool.handler(parsed.data, ctx), remainingMs, name);
+                        result = { ok: true, data };
+                    }
                 } catch (error) {
                     result = { ok: false, error: toToolError(error) };
+                } finally {
+                    ctx.toolDeadline = undefined;
                 }
             }
         }

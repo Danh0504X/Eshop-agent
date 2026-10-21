@@ -17,6 +17,8 @@ export interface VisionRequest {
         expectedQuantity: number;
         expectedAccessories: string[];
     };
+    /** Epoch ms the analysis must finish by (tool / inspection budget). */
+    deadlineMs?: number;
     /** Only read by the demo provider to pick predefined results. Never sent to a real AI provider. */
     demoContext?: {
         scenario?: string;

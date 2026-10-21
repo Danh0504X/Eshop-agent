@@ -31,11 +31,21 @@ const EnvSchema = z
         // Configurable because Gemini model availability changes; run `npm run gemini:models` to list yours.
         GEMINI_VISION_MODEL: z.string().default("gemini-3.8-flash"),
         GEMINI_PLANNER_MODEL: z.string().default("gemini-3.8-flash"),
+        // Verified on gemini-3.8-flash: LOW, MEDIUM, HIGH accepted; MINIMAL rejected (400). Unset = model default.
+        GEMINI_THINKING_LEVEL: z.preprocess(
+            (v) => (v === "" ? undefined : v),
+            z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
+        ),
+        // Transport-level backoff for 429/503 only (full jitter, honours Google's RetryInfo).
+        AI_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(6).default(3),
+        AI_RETRY_BASE_DELAY_MS: z.coerce.number().int().min(0).default(2_000),
+        AI_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(0).default(30_000),
         // Legacy Anthropic settings, kept until the Gemini migration is verified end to end.
         AI_API_KEY: z.string().optional(),
         AI_MODEL: z.string().default("claude-opus-5-5"),
         AI_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("high"),
-        AI_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+        // Per HTTP attempt; shortened automatically to fit the remaining tool/inspection budget.
+        AI_TIMEOUT_MS: z.coerce.number().int().positive().default(180_000),
         AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
         AI_REFUSAL_FALLBACK: bool(true),
         AGENT_PLANNER: z.enum(["llm", "deterministic"]).default("llm"),
@@ -91,6 +101,21 @@ const EnvSchema = z
                 path: ["AI_API_KEY"],
                 message:
                     "AI_API_KEY is required when AI_PROVIDER=anthropic and DEMO_MODE=false. Set AI_API_KEY, or set DEMO_MODE=true to run with predefined (non-AI) demo results.",
+            });
+        }
+        if (env.AI_TIMEOUT_MS >= env.AGENT_TOOL_TIMEOUT_MS) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["AI_TIMEOUT_MS"],
+                message:
+                    "AI_TIMEOUT_MS must be lower than AGENT_TOOL_TIMEOUT_MS so a slow AI request cannot consume a whole tool budget.",
+            });
+        }
+        if (env.AGENT_TOOL_TIMEOUT_MS > env.AGENT_TIMEOUT_MS) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["AGENT_TOOL_TIMEOUT_MS"],
+                message: "AGENT_TOOL_TIMEOUT_MS must not exceed AGENT_TIMEOUT_MS (the whole inspection budget).",
             });
         }
         if (env.NODE_ENV === "production" && env.DEMO_MODE) {

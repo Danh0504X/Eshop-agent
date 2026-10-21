@@ -13,18 +13,30 @@ import { connectTestDb, createMediaFromFile, createOrder, disconnectTestDb, make
 import { demoRecord } from "./fixtures";
 
 const uploader = new mongoose.Types.ObjectId().toString();
-const providerDefaults = { activeProvider: env.activeProvider, aiMode: env.aiMode };
+const providerDefaults = {
+    activeProvider: env.activeProvider,
+    aiMode: env.aiMode,
+    AI_RETRY_BASE_DELAY_MS: env.AI_RETRY_BASE_DELAY_MS,
+    AI_RETRY_MAX_DELAY_MS: env.AI_RETRY_MAX_DELAY_MS,
+    GEMINI_THINKING_LEVEL: env.GEMINI_THINKING_LEVEL,
+};
+// Keep real backoff waits out of unit tests.
+const fastRetries = { AI_RETRY_BASE_DELAY_MS: 1, AI_RETRY_MAX_DELAY_MS: 5 };
 
 let sample: VisionAnalysis;
 
 beforeAll(async () => {
     await connectTestDb();
     sample = (await demoRecord("normal", "return")).result;
+    overrideEnv(fastRetries);
 });
-afterAll(disconnectTestDb);
+afterAll(async () => {
+    overrideEnv(providerDefaults);
+    await disconnectTestDb();
+});
 afterEach(() => {
     setVisionProvider(undefined);
-    overrideEnv(providerDefaults);
+    overrideEnv({ ...providerDefaults, ...fastRetries });
 });
 
 const request = {
@@ -57,7 +69,7 @@ describe("GeminiVisionProvider (mocked client)", () => {
 
         expect(result.analysis.packageContents).toBe("items_present");
         expect(result.model).toBe("gemini-test-model");
-        expect(result.usage).toEqual({ promptTokens: 1200, outputTokens: 300, thoughtsTokens: 150 });
+        expect(result.usage).toEqual({ promptTokens: 1200, outputTokens: 300, thoughtsTokens: 150, apiAttempts: 1 });
 
         const params = generateContent.mock.calls[0][0] as unknown as {
             model: string;
@@ -114,10 +126,20 @@ describe("GeminiVisionProvider (mocked client)", () => {
         });
     });
 
-    it("classifies API errors: rate limit and timeouts retry, bad key and unknown model do not", async () => {
+    it("classifies API errors: persistent 429/503 are final, timeouts and 500 retry, bad key and unknown model do not", async () => {
         const cases: Array<[unknown, RegExp, boolean]> = [
-            [new GenAiApiError({ message: "quota", status: 429 }), /rate limit/, true],
-            [new GenAiApiError({ message: "unavailable", status: 503 }), /service error/, true],
+            // 429/503 are retried with backoff inside the provider; if they persist the error is final.
+            [
+                new GenAiApiError({ message: "quota", status: 429 }),
+                /rate limit or quota \(429\) persisted after 3 attempt/,
+                false,
+            ],
+            [
+                new GenAiApiError({ message: "unavailable", status: 503 }),
+                /service unavailable \(503\) persisted after 3/,
+                false,
+            ],
+            [new GenAiApiError({ message: "internal", status: 500 }), /service error/, true],
             [new GenAiApiError({ message: "bad key", status: 403 }), /API key/, false],
             [new GenAiApiError({ message: "no model", status: 404 }), /gemini:models/, false],
             [
@@ -140,6 +162,65 @@ describe("GeminiVisionProvider (mocked client)", () => {
     });
 });
 
+describe("Gemini transport retries and time budget", () => {
+    it("backs off on 503 and succeeds on a later attempt, recording the attempts", async () => {
+        let calls = 0;
+        const { client, generateContent } = fakeClient(() => {
+            if (++calls === 1) throw new GenAiApiError({ message: "high demand", status: 503 });
+            return geminiResponse(JSON.stringify(sample));
+        });
+        const result = await new GeminiVisionProvider(client).analyze(request);
+        expect(generateContent).toHaveBeenCalledTimes(2);
+        expect(result.usage?.apiAttempts).toBe(2);
+    });
+
+    it("does not retry non-transient errors", async () => {
+        const { client, generateContent } = fakeClient(() => {
+            throw new GenAiApiError({ message: "bad", status: 400 });
+        });
+        await expect(new GeminiVisionProvider(client).analyze(request)).rejects.toMatchObject({
+            errors: [{ retryable: false }],
+        });
+        expect(generateContent).toHaveBeenCalledTimes(1);
+    });
+
+    it("shortens the per-request timeout to fit the remaining budget", async () => {
+        const { client, generateContent } = fakeClient(() => geminiResponse(JSON.stringify(sample)));
+        await new GeminiVisionProvider(client).analyze({ ...request, deadlineMs: Date.now() + 30_000 });
+        const timeout = (generateContent.mock.calls[0][0] as { config: { httpOptions: { timeout: number } } }).config
+            .httpOptions.timeout;
+        expect(timeout).toBeLessThanOrEqual(28_000);
+        expect(timeout).toBeGreaterThan(20_000);
+
+        await new GeminiVisionProvider(client).analyze(request);
+        const unbounded = (generateContent.mock.calls[1][0] as { config: { httpOptions: { timeout: number } } }).config
+            .httpOptions.timeout;
+        expect(unbounded).toBe(env.AI_TIMEOUT_MS);
+    });
+
+    it("fails fast without calling Gemini when the budget is already used up", async () => {
+        const { client, generateContent } = fakeClient(() => geminiResponse(JSON.stringify(sample)));
+        await expect(
+            new GeminiVisionProvider(client).analyze({ ...request, deadlineMs: Date.now() + 3_000 }),
+        ).rejects.toMatchObject({
+            message: expect.stringMatching(/time budget exhausted/),
+            errors: [{ retryable: false }],
+        });
+        expect(generateContent).not.toHaveBeenCalled();
+    });
+
+    it("sends the configured thinking level and omits it when unset", async () => {
+        const { client, generateContent } = fakeClient(() => geminiResponse(JSON.stringify(sample)));
+        overrideEnv({ GEMINI_THINKING_LEVEL: undefined });
+        await new GeminiVisionProvider(client).analyze(request);
+        overrideEnv({ GEMINI_THINKING_LEVEL: "LOW" });
+        await new GeminiVisionProvider(client).analyze(request);
+        const configs = generateContent.mock.calls.map((c) => (c[0] as { config: Record<string, unknown> }).config);
+        expect(configs[0].thinkingConfig).toBeUndefined();
+        expect(configs[1].thinkingConfig).toEqual({ thinkingLevel: "LOW" });
+    });
+});
+
 describe("Gemini provider selection and pipeline", () => {
     it("is the provider used in real mode when AI_PROVIDER=gemini", () => {
         overrideEnv({ activeProvider: "gemini", aiMode: "real" });
@@ -159,7 +240,7 @@ describe("Gemini provider selection and pipeline", () => {
         const record = await analyzeEvidence((await MediaEvidence.findById(media.id))!, order);
         expect(record.source).toBe("ai");
         expect(record.model).toBe("gemini-test-model");
-        expect(record.usage?.promptTokens).toBe(1200);
+        expect(record.usage).toMatchObject({ promptTokens: 1200, apiAttempts: 1 });
         expect(record.framesAnalyzed).toHaveLength(8);
 
         const sent = JSON.stringify(generateContent.mock.calls[0][0]);

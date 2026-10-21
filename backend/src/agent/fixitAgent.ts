@@ -121,18 +121,19 @@ const runLoop = async (
     swap: (p: Planner) => void,
 ): Promise<string | undefined> => {
     let planner = initial;
-    const deadline = Date.now() + env.AGENT_TIMEOUT_MS;
-    const plannerTimeout = env.AI_TIMEOUT_MS * (env.AI_MAX_RETRIES + 1) + 5_000;
     let last: ToolOutcome[] = [];
 
     for (ctx.iteration = 1; ctx.iteration <= env.AGENT_MAX_ITERATIONS; ctx.iteration++) {
-        if (Date.now() > deadline) {
+        const remainingMs = ctx.deadline - Date.now();
+        if (remainingMs <= 0) {
             log(ctx, "guardrail", `Agent time limit of ${env.AGENT_TIMEOUT_MS} ms reached; stopping`);
+            await ctx.inspection.save();
             return undefined;
         }
         let decision;
         try {
-            decision = await withTimeout(planner.next(ctx, last), plannerTimeout, "planner");
+            // The planner shares the inspection budget; it cannot outlive the deadline.
+            decision = await withTimeout(planner.next(ctx, last), remainingMs, "planner");
         } catch (error) {
             log(ctx, "error", `Planner (${planner.kind}) failed: ${errorMessage(error)}`);
             if (planner.kind === "llm") {

@@ -36,4 +36,26 @@ describe("AI provider configuration", () => {
         expect(config.AI_API_KEY).toBeUndefined();
         expect(config.aiMode).toBe("real");
     });
+
+    it("rejects time settings where one AI request could exceed a tool or the inspection budget", () => {
+        expect(() =>
+            loadConfig({ ...base, DEMO_MODE: "true", AI_TIMEOUT_MS: "300000", AGENT_TOOL_TIMEOUT_MS: "300000" }),
+        ).toThrow(/AI_TIMEOUT_MS must be lower than AGENT_TOOL_TIMEOUT_MS/);
+        expect(() =>
+            loadConfig({ ...base, DEMO_MODE: "true", AGENT_TOOL_TIMEOUT_MS: "1000000", AGENT_TIMEOUT_MS: "900000" }),
+        ).toThrow(/AGENT_TOOL_TIMEOUT_MS must not exceed AGENT_TIMEOUT_MS/);
+        const ok = loadConfig({ ...base, DEMO_MODE: "true" });
+        expect(ok.AI_TIMEOUT_MS).toBe(180_000);
+        expect(ok.AI_TIMEOUT_MS).toBeLessThan(ok.AGENT_TOOL_TIMEOUT_MS);
+    });
+
+    it("accepts only verified thinking levels and treats an empty value as unset", () => {
+        expect(
+            loadConfig({ ...base, DEMO_MODE: "true", GEMINI_THINKING_LEVEL: "" }).GEMINI_THINKING_LEVEL,
+        ).toBeUndefined();
+        expect(loadConfig({ ...base, DEMO_MODE: "true", GEMINI_THINKING_LEVEL: "LOW" }).GEMINI_THINKING_LEVEL).toBe(
+            "LOW",
+        );
+        expect(() => loadConfig({ ...base, DEMO_MODE: "true", GEMINI_THINKING_LEVEL: "MINIMAL" })).toThrow();
+    });
 });

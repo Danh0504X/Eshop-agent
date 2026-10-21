@@ -20,7 +20,11 @@ export const selectFrames = (frames: Frame[], max: number): Frame[] => {
 };
 
 /** Analyse the extracted frames of one evidence video with the configured vision provider. */
-export const analyzeEvidence = async (media: MediaDoc, order: OrderDoc): Promise<AnalysisRecord> => {
+export const analyzeEvidence = async (
+    media: MediaDoc,
+    order: OrderDoc,
+    options: { deadlineMs?: number } = {},
+): Promise<AnalysisRecord> => {
     if (media.status !== "processed" || media.frames.length === 0) {
         throw new ApiError("INVALID_STATE", `Frames have not been extracted for ${media.type} evidence ${media.id}`);
     }
@@ -39,6 +43,7 @@ export const analyzeEvidence = async (media: MediaDoc, order: OrderDoc): Promise
     const response = await provider.analyze({
         evidenceType: media.type,
         frames,
+        deadlineMs: options.deadlineMs,
         expected: {
             productName: product.name,
             productDescription: product.description || undefined,

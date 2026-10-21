@@ -4,9 +4,8 @@ import { VisionAnalysisSchema } from "../../agent/schemas";
 import { env } from "../../config/env";
 import {
     assertUsableResponse,
+    callGemini,
     createGeminiClient,
-    mapGeminiError,
-    requestOptions,
     toGeminiJsonSchema,
     usageOf,
     type GeminiModelsClient,
@@ -45,21 +44,19 @@ export class GeminiVisionProvider implements VisionProvider {
         });
 
         this.client ??= createGeminiClient();
-        let response;
-        try {
-            response = await this.client.models.generateContent({
+        const { response, attempts } = await callGemini(
+            this.client,
+            {
                 model: env.GEMINI_VISION_MODEL,
                 contents: [{ role: "user", parts }],
                 config: {
-                    ...requestOptions(),
                     systemInstruction: VISION_SYSTEM_PROMPT,
                     responseMimeType: "application/json",
                     responseJsonSchema: RESPONSE_SCHEMA,
                 },
-            });
-        } catch (error) {
-            throw mapGeminiError(error, LABEL);
-        }
+            },
+            { label: LABEL, deadlineMs: request.deadlineMs },
+        );
 
         assertUsableResponse(response, LABEL);
         const text = response.text;
@@ -78,7 +75,7 @@ export class GeminiVisionProvider implements VisionProvider {
         return {
             analysis: parsed.data,
             model: response.modelVersion ?? env.GEMINI_VISION_MODEL,
-            usage: usageOf(response),
+            usage: usageOf(response, attempts),
         };
     }
 }

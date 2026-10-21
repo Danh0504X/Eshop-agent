@@ -57,7 +57,7 @@ export const analyzeItemTool = defineTool({
                 { retryable: false },
             ]);
 
-        const record = await analyzeEvidence(media, order);
+        const record = await analyzeEvidence(media, order, { deadlineMs: ctx.toolDeadline ?? ctx.deadline });
         ctx.analyses[args.evidenceType] = record;
         ctx.inspection.set(args.evidenceType === "outbound" ? "outboundAnalysis" : "returnAnalysis", record);
         await ctx.inspection.save();

@@ -47,3 +47,26 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
   - 404 errors now include Google's own message, which names the replacement model when one is retired.
   - Until Phase 3, `AGENT_PLANNER=llm` still uses the Anthropic planner; with only a Gemini key it fails and falls back to the deterministic planner (logged). Use `AGENT_PLANNER=deterministic` until Phase 3 lands.
 - **Suggested Git commit:** `feat(vision): integrate Gemini for structured video frame analysis`
+
+---
+
+## Step A — Stability patch: timeouts, backoff and time budget
+
+- **Files changed:** `backend/src/config/env.ts`, `backend/.env.example`, `backend/src/services/ai/gemini.ts`, `backend/src/services/vision/geminiVisionProvider.ts`, `backend/src/services/vision/types.ts`, `backend/src/services/visionService.ts`, `backend/src/agent/schemas.ts`, `backend/src/agent/agentState.ts`, `backend/src/agent/toolRegistry.ts`, `backend/src/agent/fixitAgent.ts`, `backend/src/agent/tools/analyzeItem.ts`, tests (`geminiVision`, `agentTools`, `fixitAgent`, `config`, `integration/gemini.real`)
+- **Files added:** `backend/src/utils/retry.ts`, `backend/tests/retry.test.ts`
+- **Previous behavior:**
+  - `AI_TIMEOUT_MS` = 120 s; a single real vision call was measured at 94–120+ s.
+  - No backoff: 429/503 surfaced immediately and the agent retried the tool at once (up to 3 times, no wait).
+  - Each tool had a fixed 5-minute timeout and the planner a separate fixed timeout, independent of how much of the 15-minute inspection budget was left.
+- **New behavior:**
+  - `AI_TIMEOUT_MS` default **180 s**, validated to be **< `AGENT_TOOL_TIMEOUT_MS` (300 s) ≤ `AGENT_TIMEOUT_MS` (900 s)**.
+  - **Transport retries** (`utils/retry.ts`, used by `callGemini`): only **429 and 503**, exponential backoff with full jitter (`AI_RETRY_BASE_DELAY_MS` 2 s, cap `AI_RETRY_MAX_DELAY_MS` 30 s, `AI_RETRY_MAX_ATTEMPTS` 3 incl. the first request). Google's `RetryInfo.retryDelay` (or a "retry in Ns" hint) is honoured as a minimum wait. If the error persists, it is returned as **final** (not retryable) so the agent escalates instead of compounding retries.
+  - **Three separate budgets, by design:** (1) transport retries of one HTTP request (above); (2) agent tool retries for a failed tool call (`AGENT_MAX_TOOL_RETRIES`, unchanged); (3) deliberate additional inspections (Phase 6, separate budget). Attempts are recorded as `usage.apiAttempts`.
+  - **Deadline propagation:** the agent context carries `deadline` (inspection start + `AGENT_TIMEOUT_MS`). Each tool runs until `min(deadline, tool start + AGENT_TOOL_TIMEOUT_MS)`; `analyze_item` passes that to the provider, which shortens each request's timeout to fit and never starts a backoff wait that would end past it (a request needs ≥ 5 s left or it fails fast as final). The planner is also bounded by the remaining inspection time.
+  - `GEMINI_THINKING_LEVEL` (optional): **measured on `gemini-3.8-flash`** — `LOW`, `MEDIUM`, `HIGH` accepted; `MINIMAL` rejected with 400. Only the three accepted values are allowed; empty = model default.
+- **Measurement that shaped the design:** a trivial one-word prompt took 50–72 s at every thinking level (thinking tokens 101–214). Latency is dominated by server-side queueing under high demand, not by thinking, so timeouts/backoff/budget matter more than the thinking level.
+- **Compatibility impact:** 429/503 that persist after backoff are now final (escalate) instead of retryable at the tool level. Existing `.env` files that still contain `AI_TIMEOUT_MS=120000` keep the old value — update it to `180000`.
+- **Tests executed:** typecheck OK; `npm test` 121 passed, 1 skipped; build OK. New: backoff growth/jitter/cap, Retry-After honoured, non-retryable not retried, attempt limit, deadline never overrun, server delay longer than budget, RetryInfo parsing, 503-then-success, per-request timeout shortened to the budget, fail-fast without calling Gemini, thinking level sent/omitted, tool cut off at the inspection deadline, tool not started after the budget, deadline passed to the provider, hanging planner bounded and escalated, config consistency.
+- **Real API test:** `npm run test:gemini` passed with `AI_TIMEOUT_MS=180000` (94 s, `gemini-3.8-flash`). With the local `.env` value of 120000 the same test timed out at 120 s.
+- **Known limitations:** Free-tier latency (≈ 1–2 min per call) makes a full inspection several minutes long; the per-request timeout and the 15-minute budget bound it but do not make it faster.
+- **Suggested Git commit:** `fix(ai): improve Gemini timeout handling and retry backoff`
