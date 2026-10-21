@@ -5,6 +5,7 @@ import { ApiError, errorMessage } from "../utils/errors";
 import { scrubSecrets } from "../utils/logger";
 import { TimeoutError, withTimeout } from "../utils/timeout";
 import { ALLOWED_TOOLS, type AgentContext, type ToolName } from "./agentState";
+import { traceToolResult } from "./agentTrace";
 import { allTools } from "./tools";
 import type { ToolDefinition, ToolError, ToolResult } from "./tools/types";
 
@@ -124,6 +125,7 @@ export const executeTool = async (ctx: AgentContext, name: string, rawArgs: unkn
     }
 
     const durationMs = Date.now() - started;
+    traceToolResult(name, args, result, durationMs, ctx.plannerName);
     ctx.inspection.agentLog.push({
         kind: "tool_call",
         planner: ctx.plannerName,

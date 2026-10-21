@@ -68,6 +68,9 @@ const EnvSchema = z
         MAX_VIDEO_DURATION_SEC: z.coerce.number().positive().default(600),
         MIN_VIDEO_DURATION_SEC: z.coerce.number().nonnegative().default(2),
         FRAMES_PER_VIDEO: z.coerce.number().int().min(2).max(30).default(8),
+        // Targeted re-inspection: one segment may span at most this many seconds and yield at most this many frames.
+        MAX_SEGMENT_SECONDS: z.coerce.number().positive().max(60).default(10),
+        MAX_FRAMES_PER_SEGMENT: z.coerce.number().int().min(1).max(12).default(6),
         FFMPEG_PATH: z.string().optional(),
         FFPROBE_PATH: z.string().optional(),
         FFMPEG_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
@@ -85,6 +88,8 @@ const EnvSchema = z
         RETENTION_DAYS: z.coerce.number().int().positive().default(180),
         RETENTION_SWEEP_HOURS: z.coerce.number().nonnegative().default(0),
         LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+        // Readable step-by-step agent trace on the server console (planner decisions, tool results, Gemini calls).
+        AGENT_TRACE: bool(true),
     })
     .superRefine((env, ctx) => {
         if (!env.DEMO_MODE && env.AI_PROVIDER === "gemini" && !env.GEMINI_API_KEY) {

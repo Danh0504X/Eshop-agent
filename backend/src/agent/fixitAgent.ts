@@ -12,6 +12,7 @@ import { errorMessage } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/timeout";
 import { createContext, knownEscalations, transition, type AgentContext } from "./agentState";
+import { trace, withTraceContext } from "./agentTrace";
 import { DeterministicPlanner } from "./planners/deterministicPlanner";
 import { GeminiPlanner } from "./planners/geminiPlanner";
 import { LlmPlanner } from "./planners/llmPlanner";
@@ -36,7 +37,21 @@ export interface RunOptions {
     planner?: Planner;
 }
 
-const log = (ctx: AgentContext, kind: "planner" | "guardrail" | "error" | "note", message: string, extra = {}) => {
+interface LogExtra {
+    planner?: string;
+    selectedTools?: string[];
+    rationale?: string;
+    fallbackUsed?: boolean;
+    reason?: string;
+}
+
+/** Record an agent log entry and mirror decisions, guardrails and errors to the console trace. */
+const log = (
+    ctx: AgentContext,
+    kind: "planner" | "guardrail" | "error" | "note",
+    message: string,
+    extra: LogExtra = {},
+) => {
     ctx.inspection.agentLog.push({
         kind,
         message,
@@ -45,6 +60,19 @@ const log = (ctx: AgentContext, kind: "planner" | "guardrail" | "error" | "note"
         state: ctx.state,
         ...extra,
     });
+    if (kind === "planner") {
+        const why = extra.rationale ? [`why: ${extra.rationale.replace(/\s+/g, " ").slice(0, 400)}`] : [];
+        trace(
+            extra.selectedTools
+                ? `#${ctx.iteration} [${ctx.state}] planner=${extra.planner}${extra.fallbackUsed ? " (fallback)" : ""} -> ${extra.selectedTools.join(", ")}`
+                : `#${ctx.iteration} planner=${extra.planner}${extra.fallbackUsed ? " (fallback)" : ""} FINISHED`,
+            why,
+        );
+    } else if (kind === "guardrail") {
+        trace(`GUARDRAIL: ${message}`, extra.reason ? [`reason: ${extra.reason}`] : []);
+    } else if (kind === "error") {
+        trace(`ERROR: ${message}`);
+    }
 };
 
 const principalFor = async (inspection: InspectionDoc): Promise<AuthPrincipal> => {
@@ -70,7 +98,11 @@ export const runInspection = async (inspectionId: string, options: RunOptions = 
     const inspection = await Inspection.findById(inspectionId);
     if (!inspection) throw new Error(`Inspection ${inspectionId} not found`);
     if (inspection.status !== "pending") return inspection;
+    return withTraceContext(inspection.orderId, () => execute(inspection, options));
+};
 
+const execute = async (inspection: InspectionDoc, options: RunOptions): Promise<InspectionDoc> => {
+    const inspectionId = inspection.id;
     const markOrder = (status: InspectionStatus) =>
         Order.updateOne(
             { _id: inspection.orderRef },
@@ -90,6 +122,9 @@ export const runInspection = async (inspectionId: string, options: RunOptions = 
             `Attempt ${inspection.attempt} started. Analysis mode: ${inspection.analysisMode}. planner=${planner.name}.`,
             { planner: planner.name, fallbackUsed: false },
         );
+        trace(
+            `START inspection ${inspection.id} (attempt ${inspection.attempt}) | analysis=${inspection.analysisMode === "demo" ? "DEMO DATA" : `REAL ${env.activeProvider ?? ""} (${env.GEMINI_VISION_MODEL})`} | planner=${planner.name}${planner.kind === "llm" ? ` (${env.GEMINI_PLANNER_MODEL})` : ""} | budget ${Math.round(env.AGENT_TIMEOUT_MS / 1000)}s`,
+        );
         inspection.stateHistory.push({
             state: "RECEIVED",
             at: new Date(),
@@ -105,6 +140,7 @@ export const runInspection = async (inspectionId: string, options: RunOptions = 
         return await finalize(ctx, narrative);
     } catch (error) {
         logger.error("Inspection failed", { inspectionId, error: errorMessage(error) });
+        trace(`FAILED: ${errorMessage(error)}`);
         const failed = (await Inspection.findById(inspectionId))!;
         failed.set({ status: "failed", workflowState: "FAILED", error: errorMessage(error), finishedAt: new Date() });
         failed.stateHistory.push({
@@ -346,6 +382,17 @@ const finalize = async (ctx: AgentContext, narrative: string | undefined): Promi
         inspectionId: current.id,
         details: { status, claimId: current.claimId?.toString(), escalation: current.escalation?.reasons },
     });
+    trace(
+        `RESULT status=${status.toUpperCase()} | label=${current.executionLabel} | plannerUsed=${current.plannerUsed}${current.plannerFallback ? " (fallback used)" : ""} | claim=${current.claimId ? current.claimId.toString() : "none"}`,
+        [
+            ...(status === "needs_review"
+                ? [
+                      `human review because: ${(current.reviewTask?.reasons ?? []).join("; ") || current.reviewTask?.reason}`,
+                  ]
+                : []),
+            `next action: ${current.recommendedAction ?? "-"}`,
+        ],
+    );
     return current;
 };
 

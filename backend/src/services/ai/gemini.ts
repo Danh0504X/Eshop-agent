@@ -11,6 +11,7 @@ import { env } from "../../config/env";
 import { ApiError } from "../../utils/errors";
 import { logger } from "../../utils/logger";
 import { retryWithBackoff, RetryExhaustedError, type RetryDecision } from "../../utils/retry";
+import { trace } from "../../agent/agentTrace";
 import { aiError } from "../vision/errors";
 
 /**
@@ -184,6 +185,11 @@ export const callGemini = async (
     params: GenerateContentParameters,
     options: GeminiCallOptions,
 ): Promise<{ response: GenerateContentResponse; attempts: number }> => {
+    const started = Date.now();
+    const images = countImages(params.contents);
+    trace(
+        `  ... Gemini ${options.label} request -> ${params.model}${images ? ` with ${images} frame image(s)` : ""} (waiting; per-attempt timeout ${Math.round(requestTimeoutMsSafe(options.deadlineMs) / 1000)}s)`,
+    );
     try {
         const { value, attempts } = await retryWithBackoff(
             () =>
@@ -201,17 +207,52 @@ export const callGemini = async (
                 maxDelayMs: env.AI_RETRY_MAX_DELAY_MS,
                 deadline: options.deadlineMs === undefined ? undefined : options.deadlineMs - MIN_REQUEST_MS,
                 classify: classifyTransient,
-                onRetry: ({ attempt, delayMs, error }) =>
+                onRetry: ({ attempt, delayMs, error }) => {
+                    const status = error instanceof GenAiApiError ? error.status : undefined;
                     logger.warn("Gemini transient error; backing off", {
                         label: options.label,
                         attempt,
                         delayMs,
-                        status: error instanceof GenAiApiError ? error.status : undefined,
-                    }),
+                        status,
+                    });
+                    trace(
+                        `  ... Gemini ${options.label} got ${status ?? "error"}; retry ${attempt + 1} in ${(delayMs / 1000).toFixed(1)}s`,
+                    );
+                },
             },
+        );
+        const usage = usageOf(value, attempts);
+        trace(
+            `  ... Gemini ${options.label} replied in ${((Date.now() - started) / 1000).toFixed(1)}s (tokens in ${usage.promptTokens}, out ${usage.outputTokens}, thinking ${usage.thoughtsTokens}; attempts ${attempts})`,
         );
         return { response: value, attempts };
     } catch (error) {
-        throw mapGeminiError(error, options.label);
+        const mapped = mapGeminiError(error, options.label);
+        trace(
+            `  ... Gemini ${options.label} FAILED after ${((Date.now() - started) / 1000).toFixed(1)}s: ${mapped.message}`,
+        );
+        throw mapped;
+    }
+};
+
+/** Number of inline images in a request, for the trace line. */
+const countImages = (contents: GenerateContentParameters["contents"]): number =>
+    Array.isArray(contents)
+        ? contents.reduce<number>(
+              (n, c) =>
+                  n +
+                  (typeof c === "object" && c !== null && "parts" in c && Array.isArray(c.parts)
+                      ? c.parts.filter((p) => typeof p === "object" && p !== null && "inlineData" in p).length
+                      : 0),
+              0,
+          )
+        : 0;
+
+/** requestTimeoutMs without throwing, for display only. */
+const requestTimeoutMsSafe = (deadlineMs: number | undefined): number => {
+    try {
+        return requestTimeoutMs(deadlineMs, "trace");
+    } catch {
+        return 0;
     }
 };
