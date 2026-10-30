@@ -122,6 +122,7 @@ describe("GeminiPlanner function calling", () => {
                 { id: "c6", name: "analyze_item", args: { evidenceType: "return" } },
             ),
             turn("Compare the analyses.", { id: "c7", name: "compare_items" }),
+            turn("The colour descriptions differ: look at both videos.", { id: "c7b", name: "verify_product_match" }),
             turn("Verify evidence before any claim.", { id: "c8", name: "validate_evidence" }),
             turn("Two material discrepancies and no blocking issues: draft the claim.", {
                 id: "c9",

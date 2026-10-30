@@ -1,4 +1,4 @@
-import type { AnalysisRecord, ObservationStatus, VisionAnalysis } from "../agent/schemas";
+import type { AnalysisRecord, MatchVerdict, ObservationStatus, VisionAnalysis } from "../agent/schemas";
 
 /**
  * Deterministic comparison of outbound vs return analyses.
@@ -40,8 +40,24 @@ export interface Finding {
     nature: "visual_discrepancy";
 }
 
+/**
+ * The written descriptions of a product attribute differ. Two independent descriptions can word the same product
+ * differently, so this is not a finding until the model has seen frames of both videos together.
+ */
+export interface VisualCheck {
+    attribute: "productType" | "color";
+    label: string;
+    category: FindingCategory;
+    severity: Severity;
+    outboundValue: string;
+    returnValue: string;
+    /** "uncertain" = the check ran but could not settle it, or could not be relied on. */
+    status: "pending" | "uncertain";
+}
+
 export interface ComparisonResult {
     findings: Finding[];
+    visualChecks: VisualCheck[];
     /** Findings of medium severity or above that are based on clear observations. */
     materialDiscrepancyCount: number;
     maxSeverity: Severity;
@@ -92,9 +108,79 @@ export const normalizeCode = (value: string): string => value.toUpperCase().repl
 
 const normalizeText = (value: string): string =>
     value
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "")
+        .replace(/đ/gi, "d")
         .toLowerCase()
         .replace(/[^a-z0-9 ]/g, "")
         .trim();
+
+const FILLER_WORDS = new Set(["a", "an", "the", "of", "pair", "set", "piece", "unit"]);
+
+/** Same words in any order, ignoring plurals and filler. "display module" and "OLED display module" are not equal. */
+export const sameProductWords = (a: string, b: string): boolean => {
+    const words = (value: string) =>
+        [
+            ...new Set(
+                normalizeText(value)
+                    .split(/\s+/)
+                    .filter((w) => w && !FILLER_WORDS.has(w))
+                    .map((w) => (w.length > 3 && !w.endsWith("ss") ? w.replace(/s$/, "") : w)),
+            ),
+        ]
+            .sort()
+            .join(" ");
+    return words(a) === words(b);
+};
+
+const BASIC_COLORS = new Set([
+    "black",
+    "white",
+    "gray",
+    "red",
+    "orange",
+    "yellow",
+    "green",
+    "blue",
+    "purple",
+    "pink",
+    "brown",
+    "gold",
+]);
+const COLOR_PHRASES = Object.entries(COLOR_SYNONYMS)
+    .sort(([a], [b]) => b.length - a.length)
+    .map(([phrase, basic]) => ({ pattern: new RegExp(`\\b${phrase}\\b`, "g"), basic }));
+
+const colorWords = (value: string): Set<string> => {
+    let text = value.toLowerCase();
+    const found = new Set<string>();
+    for (const { pattern, basic } of COLOR_PHRASES) {
+        if (text.search(pattern) >= 0) found.add(basic);
+        text = text.replace(pattern, " ");
+    }
+    for (const word of text.split(/[^a-z]+/)) if (BASIC_COLORS.has(word)) found.add(word);
+    return found;
+};
+
+/**
+ * "blue PCB with dark screen" and "blue and black" agree: the colours named by one are all named by the other.
+ * "black and red" and "black and blue" do not.
+ */
+export const sameColor = (a: string, b: string): boolean => {
+    const [x, y] = [colorWords(a), colorWords(b)];
+    if (!x.size || !y.size) return normalizeColor(a) === normalizeColor(b);
+    return [...x].every((c) => y.has(c)) || [...y].every((c) => x.has(c));
+};
+
+/** Model codes without a brand name in front of either: "Sony WH-100" and "WH-100" agree, "SW-200-LITE" and "SW-200" do not. */
+export const sameModelCode = (a: string, b: string, brands: string[]): boolean => {
+    const code = (value: string) => {
+        const text = normalizeCode(value);
+        const brand = brands.map(normalizeCode).find((name) => name && text.startsWith(name) && text !== name);
+        return brand ? text.slice(brand.length) : text;
+    };
+    return code(a) === code(b);
+};
 
 const PACKAGING_RANK: Record<VisionAnalysis["packagingCondition"]["overall"], number> = {
     intact: 0,
@@ -111,6 +197,7 @@ interface Ctx {
     poorConditions: boolean;
     findings: Finding[];
     unverified: string[];
+    visualChecks: VisualCheck[];
 }
 
 const refs = (record: AnalysisRecord, ids: string[]): EvidenceRef[] =>
@@ -129,13 +216,16 @@ const add = (ctx: Ctx, f: Omit<Finding, "id" | "nature" | "confidence"> & { conf
     });
 };
 
+const unverifiableText = (attribute: string) =>
+    `${attribute} could not be compared reliably from the available frames.`;
+
 const unverifiable = (ctx: Ctx, attribute: string, out: string | null, ret: string | null, evidence: EvidenceRef[]) => {
     ctx.unverified.push(attribute);
     add(ctx, {
         category: "unverifiable_attribute",
         severity: "info",
         certainty: "uncertain",
-        description: `${attribute} could not be compared reliably from the available frames.`,
+        description: unverifiableText(attribute),
         outboundObservation: out,
         returnObservation: ret,
         evidence,
@@ -163,6 +253,7 @@ export const compareAnalyses = (
         ),
         findings: [],
         unverified: [],
+        visualChecks: [],
     };
 
     // 1. Package contents
@@ -239,17 +330,28 @@ export const compareAnalyses = (
             label: string;
             category: FindingCategory;
             severity: Severity;
-            norm: (v: string) => string;
+            same: (a: string, b: string) => boolean;
         }> = [
             {
                 key: "productType",
                 label: "Product type",
                 category: "product_type_mismatch",
                 severity: "high",
-                norm: normalizeText,
+                same: sameProductWords,
             },
-            { key: "model", label: "Model", category: "model_mismatch", severity: "high", norm: normalizeCode },
-            { key: "color", label: "Colour", category: "color_mismatch", severity: "medium", norm: normalizeColor },
+            {
+                key: "model",
+                label: "Model",
+                category: "model_mismatch",
+                severity: "high",
+                same: (a, b) =>
+                    sameModelCode(
+                        a,
+                        b,
+                        [oi.brand.value, ri.brand.value].filter((v) => v !== null),
+                    ),
+            },
+            { key: "color", label: "Colour", category: "color_mismatch", severity: "medium", same: sameColor },
         ];
         for (const attr of attrs) {
             const o = oi[attr.key];
@@ -261,9 +363,24 @@ export const compareAnalyses = (
                 unverifiable(ctx, attr.label, describe(o), describe(r), evidence);
                 continue;
             }
-            if (attr.norm(o.value!) === attr.norm(r.value!)) continue;
+            if (attr.same(o.value!, r.value!)) continue;
             if (attr.key === "color" && ctx.poorConditions) {
                 unverifiable(ctx, attr.label, describe(o), describe(r), evidence);
+                continue;
+            }
+            // A printed model code is read, not described, so it can differ on its own. Names and colours are wording
+            // until the model has compared the frames of both videos (verify_product_match).
+            if (attr.key !== "model") {
+                unverifiable(ctx, attr.label, describe(o), describe(r), evidence);
+                ctx.visualChecks.push({
+                    attribute: attr.key,
+                    label: attr.label,
+                    category: attr.category,
+                    severity: attr.severity,
+                    outboundValue: String(o.value),
+                    returnValue: String(r.value),
+                    status: "pending",
+                });
                 continue;
             }
             add(ctx, {
@@ -341,24 +458,79 @@ export const compareAnalyses = (
     // 6. Product condition (damage on the item itself)
     if (oi && ri && !returnEmpty) compareProductCondition(ctx, oi.condition, ri.condition);
 
-    const material = ctx.findings.filter(
+    return conclude(ctx.findings, ctx.unverified, ctx.visualChecks, {
+        overallConfidence: ctx.confidence,
+        meetsThreshold: ctx.confidence >= threshold,
+    });
+};
+
+const conclude = (
+    findings: Finding[],
+    unverifiedAttributes: string[],
+    visualChecks: VisualCheck[],
+    confidence: Pick<ComparisonResult, "overallConfidence" | "meetsThreshold">,
+): ComparisonResult => {
+    const material = findings.filter(
         (f) => severityRank(f.severity) >= severityRank("medium") && f.certainty === "observed",
     );
-    const maxSeverity = ctx.findings.reduce<Severity>(
+    const maxSeverity = findings.reduce<Severity>(
         (max, f) => (severityRank(f.severity) > severityRank(max) ? f.severity : max),
         "info",
     );
     return {
-        findings: ctx.findings,
+        findings,
+        visualChecks,
         materialDiscrepancyCount: material.length,
         maxSeverity,
-        overallConfidence: ctx.confidence,
-        meetsThreshold: ctx.confidence >= threshold,
-        unverifiedAttributes: ctx.unverified,
-        summary: summarize(material, ctx.findings, ctx.unverified),
+        overallConfidence: confidence.overallConfidence,
+        meetsThreshold: confidence.meetsThreshold,
+        unverifiedAttributes,
+        summary: summarize(material, findings, unverifiedAttributes),
         disclaimer: DISCLAIMER,
         comparedAt: new Date().toISOString(),
     };
+};
+
+/**
+ * Settle the pending visual checks with the model's answer after seeing both videos. "same" drops the difference,
+ * "different" makes it a finding, and "uncertain" keeps it unverified. Findings from printed model codes,
+ * quantities or damage are never touched, whatever the answer.
+ */
+export const applyProductMatch = (
+    comparison: ComparisonResult,
+    verdicts: Record<VisualCheck["attribute"], MatchVerdict>,
+    evidence: EvidenceRef[],
+): ComparisonResult => {
+    let findings = comparison.findings;
+    let unverified = comparison.unverifiedAttributes;
+    const visualChecks: VisualCheck[] = [];
+    const added: Finding[] = [];
+    for (const check of comparison.visualChecks) {
+        const verdict = verdicts[check.attribute];
+        if (verdict === "uncertain") {
+            visualChecks.push({ ...check, status: "uncertain" });
+            continue;
+        }
+        const text = unverifiableText(check.label);
+        findings = findings.filter((f) => !(f.category === "unverifiable_attribute" && f.description === text));
+        unverified = unverified.filter((a) => a !== check.label);
+        if (verdict === "different") {
+            added.push({
+                id: "",
+                category: check.category,
+                severity: check.severity,
+                confidence: comparison.overallConfidence,
+                certainty: "observed",
+                description: `${check.label} differs: "${check.outboundValue}" when packed, "${check.returnValue}" in the return, confirmed by comparing frames of both videos.`,
+                outboundObservation: `${check.outboundValue} (observed)`,
+                returnObservation: `${check.returnValue} (observed)`,
+                evidence,
+                nature: "visual_discrepancy",
+            });
+        }
+    }
+    const numbered = [...findings, ...added].map((f, i) => ({ ...f, id: `F${String(i + 1).padStart(2, "0")}` }));
+    return conclude(numbered, unverified, visualChecks, comparison);
 };
 
 type ProductCondition = VisionAnalysis["items"][number]["condition"];

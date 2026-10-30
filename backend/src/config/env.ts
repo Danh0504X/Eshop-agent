@@ -75,6 +75,8 @@ const EnvSchema = z
         // Targeted re-inspection: one segment may span at most this many seconds and yield at most this many frames.
         MAX_SEGMENT_SECONDS: z.coerce.number().positive().max(60).default(10),
         MAX_FRAMES_PER_SEGMENT: z.coerce.number().int().min(1).max(12).default(6),
+        // Frames of each video sent when both are compared in one request (verify_product_match).
+        MAX_FRAMES_PER_MATCH_CHECK: z.coerce.number().int().min(1).max(12).default(5),
         // Budgets for adaptive re-inspection, per inspection run. Separate from transport and tool-failure retries.
         MAX_SEGMENT_INSPECTIONS: z.coerce.number().int().min(0).max(10).default(3),
         MAX_REANALYSES_PER_VIDEO: z.coerce.number().int().min(0).max(3).default(1),

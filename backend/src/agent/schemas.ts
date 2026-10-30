@@ -194,6 +194,65 @@ export const normalizeAnalysis = (
     return { result, notes };
 };
 
+/** Answer to "is this the same product?" after seeing frames of both recordings in one request. */
+const MatchVerdict = z.enum(["same", "different", "uncertain"]);
+export type MatchVerdict = z.infer<typeof MatchVerdict>;
+
+export const ProductMatchSchema = z.object({
+    productType: MatchVerdict,
+    color: MatchVerdict,
+    reason: z.string(),
+    outboundFrameIds: z.array(z.string()),
+    returnFrameIds: z.array(z.string()),
+    suspectedInstructionText: z.array(z.string()),
+    overallConfidence: z.number(),
+});
+export type ProductMatch = z.infer<typeof ProductMatchSchema>;
+
+/** What the inspection stores for a product match check. */
+export interface ProductMatchRecord {
+    source: "ai" | "demo";
+    model: string | null;
+    framesAnalyzed: Array<{ frameId: string; timestampSec: number }>;
+    verifiedAt: string;
+    result: ProductMatch;
+    validationNotes: string[];
+    usage?: { promptTokens: number; outputTokens: number; thoughtsTokens: number; apiAttempts: number };
+}
+
+/**
+ * A verdict only counts when it is grounded in frames of both recordings, the model is confident and the footage
+ * contains no text addressed to the AI. Anything else becomes "uncertain", which sends the case to a person.
+ */
+export const normalizeProductMatch = (
+    raw: ProductMatch,
+    sent: { outbound: string[]; return: string[] },
+    threshold: number,
+): { result: ProductMatch; notes: string[] } => {
+    const notes: string[] = [];
+    const outboundFrameIds = raw.outboundFrameIds.filter((id) => sent.outbound.includes(id));
+    const returnFrameIds = raw.returnFrameIds.filter((id) => sent.return.includes(id));
+    const overallConfidence = Math.min(
+        1,
+        Math.max(0, Number.isFinite(raw.overallConfidence) ? raw.overallConfidence : 0),
+    );
+    if (!outboundFrameIds.length || !returnFrameIds.length) notes.push("No valid frame cited for one of the videos");
+    if (overallConfidence < threshold) notes.push(`Confidence ${overallConfidence.toFixed(2)} is below ${threshold}`);
+    if (raw.suspectedInstructionText.length) notes.push("Footage contains text addressed to the AI");
+    const settle = (verdict: MatchVerdict): MatchVerdict => (notes.length ? "uncertain" : verdict);
+    return {
+        result: {
+            ...raw,
+            productType: settle(raw.productType),
+            color: settle(raw.color),
+            outboundFrameIds,
+            returnFrameIds,
+            overallConfidence,
+        },
+        notes,
+    };
+};
+
 /**
  * Structured answer to one targeted question about a short video segment (adaptive re-inspection).
  * `verdict` is relative to the question asked; it is never a judgement about any person.

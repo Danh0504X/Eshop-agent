@@ -1,5 +1,7 @@
 import type { VisionAnalysis } from "../../agent/schemas";
 import type {
+    ProductMatchRequest,
+    ProductMatchResponse,
     SegmentVisionRequest,
     SegmentVisionResponse,
     VisionProvider,
@@ -39,6 +41,23 @@ export class DemoVisionProvider implements VisionProvider {
         const base = baseline(request, ids);
         const analysis = request.evidenceType === "outbound" ? base : applyReturn(base, scenario, request, ids);
         return { analysis, model: null };
+    }
+
+    /** mismatch: the colour really differs and the kind of product does not. Every other scenario matches. */
+    async verifyProductMatch(request: ProductMatchRequest): Promise<ProductMatchResponse> {
+        const mismatch = request.demoContext?.scenario === "mismatch";
+        return {
+            model: null,
+            match: {
+                productType: "same",
+                color: mismatch ? "different" : "same",
+                reason: DEMO_NOTE,
+                outboundFrameIds: request.outboundFrames.slice(0, 2).map((f) => f.frameId),
+                returnFrameIds: request.returnFrames.slice(0, 2).map((f) => f.frameId),
+                suspectedInstructionText: [],
+                overallConfidence: 0.9,
+            },
+        };
     }
 
     /**

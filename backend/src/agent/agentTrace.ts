@@ -124,12 +124,29 @@ export const summarizeToolResult = (tool: string, data: Data): { headline: strin
                                 ? ` (${f.evidence.map((e: Data) => `${e.frameId}@${e.timestampSec?.toFixed?.(1) ?? "?"}s`).join(", ")})`
                                 : ""),
                     ),
+                    ...(data.visualChecks ?? []).map(
+                        (c: Data) => `to check on both videos: ${c.label} "${c.outboundValue}" vs "${c.returnValue}"`,
+                    ),
                     ...(data.unverifiedAttributes?.length
                         ? [`not verifiable: ${data.unverifiedAttributes.join(", ")}`]
                         : []),
                 ],
             };
         }
+        case "verify_product_match":
+            return {
+                headline: `product match (${data.source === "demo" ? "DEMO DATA" : "AI"}): ${(data.checks ?? []).map((c: Data) => `${c.label}=${String(c.verdict).toUpperCase()}`).join(", ")}, confidence ${Number(data.overallConfidence ?? 0).toFixed(2)}`,
+                details: [
+                    ...(data.checks ?? []).map(
+                        (c: Data) => `${c.label}: "${c.outboundValue}" vs "${c.returnValue}" -> ${c.verdict}`,
+                    ),
+                    `frames sent: ${(data.framesAnalyzed ?? []).map((f: Data) => f.frameId).join(" ")}`,
+                    `product seen in: ${[...(data.outboundFrameIds ?? []), ...(data.returnFrameIds ?? [])].join(" ") || "none"}`,
+                    `why: ${data.reason}`,
+                    ...(data.validationNotes ?? []).map((n: string) => `not relied on: ${n}`),
+                    `now ${data.materialDiscrepancyCount} material discrepancy(ies)`,
+                ],
+            };
         case "inspect_video_segment": {
             const budget = data.budgetRemaining ?? {};
             return {

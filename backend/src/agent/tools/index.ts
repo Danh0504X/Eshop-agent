@@ -8,6 +8,7 @@ import { lookupOrderTool } from "./lookupOrder";
 import { notifyHumanTool } from "./notifyHuman";
 import type { ToolDefinition } from "./types";
 import { validateEvidenceTool } from "./validateEvidence";
+import { verifyProductMatchTool } from "./verifyProductMatch";
 
 export const allTools: ToolDefinition<any>[] = [
     lookupOrderTool,
@@ -16,6 +17,7 @@ export const allTools: ToolDefinition<any>[] = [
     extractFramesTool,
     analyzeItemTool,
     compareItemsTool,
+    verifyProductMatchTool,
     buildClaimPackTool,
     inspectVideoSegmentTool,
     notifyHumanTool,

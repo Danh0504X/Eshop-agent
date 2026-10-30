@@ -74,7 +74,10 @@ describe("console trace of the two-video check", () => {
         expect(out).toMatch(/frames: OUT-01@\d+\.\ds/);
         expect(out).toMatch(/OK {3}analyze_item \{"evidenceType":"return"\}.*return analysis \(DEMO DATA\)/);
         expect(out).toMatch(/colour white \(observed\) \| model .*-LITE \(observed\)/);
-        expect(out).toMatch(/comparison: 2 material discrepancy\(ies\), max severity high/);
+        expect(out).toMatch(/comparison: 1 material discrepancy\(ies\), max severity high/);
+        expect(out).toMatch(/to check on both videos: Colour "black" vs "white"/);
+        expect(out).toMatch(/OK {3}verify_product_match .*product match \(DEMO DATA\): Colour=DIFFERENT/);
+        expect(out).toMatch(/now 2 material discrepancy\(ies\)/);
         expect(out).toMatch(/F01 HIGH model_mismatch \[observed\].*\(OUT-05@\d+\.\ds/);
         expect(out).toMatch(/final validation: OK/);
         expect(out).toMatch(/draft claim .* created \(pending_approval\)/);

@@ -16,6 +16,7 @@ export const TOOL_NAMES = [
     "validate_evidence",
     "analyze_item",
     "compare_items",
+    "verify_product_match",
     "build_claim_pack",
     "inspect_video_segment",
     "notify_human",
@@ -32,7 +33,7 @@ export const ALLOWED_TOOLS: Record<WorkflowState, ToolName[]> = {
     EVIDENCE_VALIDATION: ["extract_frames", "notify_human"],
     FRAME_EXTRACTION: ["extract_frames", "analyze_item", "notify_human"],
     ITEM_ANALYSIS: ["analyze_item", "compare_items", "inspect_video_segment", "notify_human"],
-    COMPARISON: ["validate_evidence", "inspect_video_segment", "notify_human"],
+    COMPARISON: ["verify_product_match", "validate_evidence", "inspect_video_segment", "notify_human"],
     VERIFICATION: ["build_claim_pack", "inspect_video_segment", "notify_human"],
     // Entered after a targeted segment inspection. New evidence must be compared and verified again before
     // any claim: there is no path from here to build_claim_pack except compare_items -> validate_evidence.

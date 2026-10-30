@@ -89,6 +89,7 @@ const spyProvider = () => {
             provider.calls++;
             return demo.analyze(req);
         },
+        verifyProductMatch: (req) => demo.verifyProductMatch(req),
     };
     setVisionProvider(provider);
     return provider;
@@ -276,6 +277,7 @@ describe("FixIt agent with the LLM planner (mocked client)", () => {
                 toolUse("t6", "analyze_item", { evidenceType: "return" }),
             ),
             reply(toolUse("t7", "compare_items")),
+            reply(toolUse("t7b", "verify_product_match")),
             reply(toolUse("t8", "validate_evidence")),
             reply(toolUse("t9", "build_claim_pack")),
             reply({

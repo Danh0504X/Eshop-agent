@@ -107,6 +107,36 @@ describe("GeminiVisionProvider (mocked client)", () => {
         });
     });
 
+    it("compares both videos in one request, without naming the product", async () => {
+        const answer = {
+            productType: "same",
+            color: "uncertain",
+            reason: "Same module",
+            outboundFrameIds: ["OUT-01"],
+            returnFrameIds: ["RET-01"],
+            suspectedInstructionText: [],
+            overallConfidence: 0.9,
+        };
+        const { client, generateContent } = fakeClient(() => geminiResponse(JSON.stringify(answer)));
+        const result = await new GeminiVisionProvider(client).verifyProductMatch({
+            outboundFrames: [{ frameId: "OUT-01", timestampSec: 0.5, jpeg: Buffer.from([0xff, 0xd8, 0xff]) }],
+            returnFrames: request.frames,
+        });
+
+        expect(result.match).toEqual(answer);
+        expect(result.usage?.promptTokens).toBe(1200);
+        const params = generateContent.mock.calls[0]![0] as {
+            contents: Array<{ parts: Array<{ text?: string; inlineData?: unknown }> }>;
+            config: { responseJsonSchema: { properties: object } };
+        };
+        const parts = params.contents[0]!.parts;
+        const text = parts.flatMap((p) => p.text ?? []).join("\n");
+        expect(parts.filter((p) => p.inlineData)).toHaveLength(3);
+        expect(text).toMatch(/OUTBOUND[\s\S]*Frame OUT-01[\s\S]*RETURN[\s\S]*Frame RET-01[\s\S]*Frame RET-02/);
+        expect(text).not.toMatch(/Headphones/);
+        expect(params.config.responseJsonSchema.properties).toHaveProperty("productType");
+    });
+
     it("treats safety blocks as final and truncation as retryable", async () => {
         const blocked = fakeClient(() => geminiResponse(undefined, FinishReason.SAFETY));
         await expect(new GeminiVisionProvider(blocked.client).analyze(request)).rejects.toMatchObject({

@@ -62,7 +62,7 @@ const run = async (ctx: AgentContext, name: string, args: unknown = {}) => execu
 describe("tool registry guards", () => {
     it("exposes the planner tools with object schemas", () => {
         const defs = plannerToolDefinitions();
-        expect(defs).toHaveLength(9);
+        expect(defs).toHaveLength(10);
         for (const d of defs) expect(d.input_schema.type).toBe("object");
     });
 
@@ -105,7 +105,11 @@ describe("tool workflow", () => {
         });
         expect((await run(ctx, "analyze_item", { evidenceType: "outbound" })).ok).toBe(true);
         expect((await run(ctx, "analyze_item", { evidenceType: "return" })).ok).toBe(true);
-        expect(await run(ctx, "compare_items")).toMatchObject({ ok: true, data: { materialDiscrepancyCount: 2 } });
+        expect(await run(ctx, "compare_items")).toMatchObject({ ok: true, data: { materialDiscrepancyCount: 1 } });
+        expect(await run(ctx, "verify_product_match")).toMatchObject({
+            ok: true,
+            data: { materialDiscrepancyCount: 2 },
+        });
         expect(await run(ctx, "validate_evidence")).toMatchObject({
             ok: true,
             data: { stage: "final", blocking: false },
@@ -126,7 +130,7 @@ describe("tool workflow", () => {
         expect(saved?.outboundAnalysis.source).toBe("demo");
         expect(saved?.comparison.findings.length).toBeGreaterThan(0);
         expect(saved?.frameReferences.length).toBeGreaterThan(0);
-        expect(saved?.agentLog.filter((l) => l.kind === "tool_call")).toHaveLength(9);
+        expect(saved?.agentLog.filter((l) => l.kind === "tool_call")).toHaveLength(10);
         expect(await Claim.countDocuments({ inspectionId: ctx.inspection._id })).toBe(1);
         expect(
             await AuditLog.countDocuments({ inspectionId: ctx.inspection.id, actorType: "agent" }),

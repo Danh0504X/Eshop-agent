@@ -30,12 +30,13 @@ describe("compareAnalyses", () => {
         expect(result.findings.find((f) => f.category === "missing_accessory")?.severity).toBe("medium");
     });
 
-    it("case 3: different visible model and colour are reported as visual mismatches", async () => {
+    it("case 3: a different printed model is a mismatch, a different colour first needs a look at both videos", async () => {
         const { outbound, returned } = await demoPair("mismatch");
         const result = compareAnalyses(outbound, returned, { expectedQuantity: 1 }, T);
         const categories = result.findings.map((f) => f.category);
         expect(categories).toContain("model_mismatch");
-        expect(categories).toContain("color_mismatch");
+        expect(categories).not.toContain("color_mismatch");
+        expect(result.visualChecks).toMatchObject([{ attribute: "color", outboundValue: "black", status: "pending" }]);
         expect(result.maxSeverity).toBe("high");
     });
 

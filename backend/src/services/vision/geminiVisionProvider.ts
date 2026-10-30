@@ -1,12 +1,14 @@
 import type { GenerateContentResponse, Part } from "@google/genai";
 import type { z } from "zod";
 import {
+    buildProductMatchUserText,
     buildSegmentUserText,
     buildVisionUserText,
+    PRODUCT_MATCH_SYSTEM_PROMPT,
     SEGMENT_SYSTEM_PROMPT,
     VISION_SYSTEM_PROMPT,
 } from "../../agent/prompts";
-import { SegmentObservationSchema, VisionAnalysisSchema } from "../../agent/schemas";
+import { ProductMatchSchema, SegmentObservationSchema, VisionAnalysisSchema } from "../../agent/schemas";
 import { env } from "../../config/env";
 import {
     assertUsableResponse,
@@ -18,6 +20,8 @@ import {
 } from "../ai/gemini";
 import { aiError } from "./errors";
 import type {
+    ProductMatchRequest,
+    ProductMatchResponse,
     SegmentVisionRequest,
     SegmentVisionResponse,
     VisionFrame,
@@ -29,6 +33,7 @@ import type {
 const LABEL = "Vision model";
 const ANALYSIS_SCHEMA = toGeminiJsonSchema(VisionAnalysisSchema);
 const SEGMENT_SCHEMA = toGeminiJsonSchema(SegmentObservationSchema);
+const PRODUCT_MATCH_SCHEMA = toGeminiJsonSchema(ProductMatchSchema);
 
 /** Each frame as its label followed by the inline JPEG, so the model can cite frame IDs. */
 const frameParts = (frames: VisionFrame[]): Part[] =>
@@ -96,6 +101,40 @@ export class GeminiVisionProvider implements VisionProvider {
         );
         return {
             analysis: parseStructured(response, VisionAnalysisSchema),
+            model: response.modelVersion ?? env.GEMINI_VISION_MODEL,
+            usage: usageOf(response, attempts),
+        };
+    }
+
+    async verifyProductMatch(request: ProductMatchRequest): Promise<ProductMatchResponse> {
+        const parts: Part[] = [
+            { text: "Frames from the OUTBOUND packing recording:" },
+            ...frameParts(request.outboundFrames),
+            { text: "Frames from the RETURN opening recording:" },
+            ...frameParts(request.returnFrames),
+            {
+                text: buildProductMatchUserText({
+                    outboundFrames: request.outboundFrames.length,
+                    returnFrames: request.returnFrames.length,
+                }),
+            },
+        ];
+        this.client ??= createGeminiClient();
+        const { response, attempts } = await callGemini(
+            this.client,
+            {
+                model: env.GEMINI_VISION_MODEL,
+                contents: [{ role: "user", parts }],
+                config: {
+                    systemInstruction: PRODUCT_MATCH_SYSTEM_PROMPT,
+                    responseMimeType: "application/json",
+                    responseJsonSchema: PRODUCT_MATCH_SCHEMA,
+                },
+            },
+            { label: `${LABEL} (product match)`, deadlineMs: request.deadlineMs },
+        );
+        return {
+            match: parseStructured(response, ProductMatchSchema),
             model: response.modelVersion ?? env.GEMINI_VISION_MODEL,
             usage: usageOf(response, attempts),
         };

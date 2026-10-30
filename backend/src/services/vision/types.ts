@@ -1,4 +1,4 @@
-import type { SegmentObservation, VisionAnalysis } from "../../agent/schemas";
+import type { ProductMatch, SegmentObservation, VisionAnalysis } from "../../agent/schemas";
 import type { AiUsage } from "../ai/gemini";
 
 export interface VisionFrame {
@@ -52,9 +52,26 @@ export interface SegmentVisionResponse {
     usage?: AiUsage;
 }
 
+/** Frames of both videos in one request. Carries no product name or description, so only the images can decide. */
+export interface ProductMatchRequest {
+    outboundFrames: VisionFrame[];
+    returnFrames: VisionFrame[];
+    deadlineMs?: number;
+    /** Only read by the demo provider. Never sent to a real AI provider. */
+    demoContext?: { scenario?: string };
+}
+
+export interface ProductMatchResponse {
+    match: ProductMatch;
+    model: string | null;
+    usage?: AiUsage;
+}
+
 export interface VisionProvider {
     readonly source: "ai" | "demo";
     analyze(request: VisionRequest): Promise<VisionResponse>;
     /** Targeted look at a few frames with one question (adaptive re-inspection). Optional per provider. */
     inspectSegment?(request: SegmentVisionRequest): Promise<SegmentVisionResponse>;
+    /** Compare the product across both videos in one request. Optional per provider. */
+    verifyProductMatch?(request: ProductMatchRequest): Promise<ProductMatchResponse>;
 }

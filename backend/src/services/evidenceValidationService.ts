@@ -23,6 +23,7 @@ export type EscalationCode =
     | "ORDER_ID_MISMATCH"
     | "EVIDENCE_NOT_SCANNED"
     | "KEY_ATTRIBUTE_UNVERIFIABLE"
+    | "PRODUCT_MATCH_UNVERIFIED"
     | "INSTRUCTION_TEXT_IN_FOOTAGE"
     | "WORKFLOW_ERROR";
 
@@ -371,6 +372,16 @@ const validateComparison = (
             name: "key_attributes",
             status: "pass",
             detail: "Package contents and quantity were comparable",
+        });
+    }
+    // The written descriptions differ and no look at both videos settled it: a person decides, without a claim.
+    if (comparison.visualChecks.length) {
+        const labels = comparison.visualChecks.map((c) => c.label);
+        checks.push({ name: "product_match", status: "warn", detail: `Not settled: ${labels.join(", ")}` });
+        reason({
+            code: "PRODUCT_MATCH_UNVERIFIED",
+            blocking: false,
+            message: `Could not confirm from the footage whether the product matches: ${labels.join(", ").toLowerCase()}`,
         });
     }
     if (!comparison.meetsThreshold) {

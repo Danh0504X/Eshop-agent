@@ -131,7 +131,7 @@ describe("report and claim pack", () => {
         expect(claim.status).toBe("pending_approval");
         expect(claim.aiGenerated).toBe(true);
         expect(claim.findings.map((f: { category: string }) => f.category)).toEqual(
-            expect.arrayContaining(["model_mismatch", "color_mismatch"]),
+            expect.arrayContaining(["model_mismatch"]),
         );
         expect(claim.evidenceReferences.length).toBeGreaterThan(0);
         expect(await storage().exists(claim.reportStorageKey!)).toBe(true);

@@ -78,6 +78,8 @@ const InspectionSchema = new Schema(
         outboundAnalysis: { type: Schema.Types.Mixed },
         returnAnalysis: { type: Schema.Types.Mixed },
         comparison: { type: Schema.Types.Mixed },
+        /** The look at frames of both videos together, when the written product descriptions differed. */
+        productMatch: { type: Schema.Types.Mixed },
         /** Model-reported confidence is stored as-is; it is NOT treated as a calibrated probability. */
         confidence: {
             score: Number,
