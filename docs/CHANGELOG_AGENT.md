@@ -271,3 +271,19 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
   - Routes for orders, new order, order detail, returns and claims exist; their pages are placeholders replaced in the next steps. No agent logs or raw data are shown anywhere.
 - **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `web/` OK. Ran the app against a throwaway in-memory MongoDB seeded with the demo data (backend on 4100 with `DEMO_MODE=true`) and drove it in headless Chrome: login page, real login through the form, orders and returns routes and the 404 page at 1280x800 and 390x844, with no console errors.
 - **Suggested Git commit:** `feat(web): scaffold the new frontend with login and responsive app shell`
+
+---
+
+## Scan-first redesign W2 — Label scanner and video recorder in `web/`
+
+- **Files added:** `web/src/lib/barcode.ts`, `web/src/lib/camera.ts`, `web/src/components/LabelScanner.tsx`, `web/src/components/VideoCapture.tsx`, `web/src/pages/DeviceCheckPage.tsx`
+- **Files changed:** `web/package.json`, `web/package-lock.json`, `web/vite.config.ts`, `web/src/App.tsx`, `web/src/components/icons.tsx`, `web/src/styles.css`
+- **New behavior:**
+  - `LabelScanner` reads the tracking code with the camera (rear camera when available) or, when `ALLOW_FILE_EVIDENCE` is on, from an uploaded photo of the label. Decoding uses `barcode-detector` (ZXing-C++ WebAssembly) for Code 128/39/93, ITF, EAN-13, QR and Data Matrix; the `.wasm` is bundled and served by the app, never fetched from a CDN. A camera read is accepted after the same code appears in two consecutive frames; a label with several codes asks the person to pick the tracking number; a value that cannot be a tracking code (for example a URL in a QR code) is rejected with a hint. "Nhãn bị hỏng? Nhập tay" accepts a typed code (same format rule) and reports it as a manual entry. No hand-scanner support (not needed).
+  - `VideoCapture` records with the browser camera through `MediaRecorder` (VP8 WebM, or MP4 on Safari), shows a timer, stops automatically at 600 s, and lets the person review, re-record or confirm; recordings shorter than 2 s cannot be confirmed. When `ALLOW_FILE_EVIDENCE` is on it also accepts a video file from the computer. Files are created with the plain MIME type (`video/webm`) the backend accepts.
+  - Camera errors (permission denied, no camera, camera in use, non-HTTPS page) get Vietnamese messages and a retry.
+  - Development page `/dev/devices` (only routed by the dev server) tries both components without contacting the backend and can download the recording.
+  - `npm run dev:https` serves the dev server over HTTPS on the local network (`@vitejs/plugin-basic-ssl`), because phones only allow the camera on HTTPS.
+- **Problems found while testing and fixed:** headless Chrome reported `video/webm;codecs=vp9` as supported but produced empty recordings, so VP8 is preferred and an empty recording or a recorder error is reported instead of being handed over; the camera frame is height-capped and centered on wide screens so the controls stay visible.
+- **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `web/` OK. Drove the dev page in headless Chrome against a throwaway in-memory database, with a fake camera fed by a generated Code 128 label: camera scan → `GHN12345678`; uploaded label → same code; label with two barcodes → choice list; URL QR → rejected; manual entry validated. Recorded 3 s with the fake camera: 43 KB VP8 WebM whose container has no duration (`duration=N/A`), which the backend's `probeVideo` measured as 3.2 s and `POST /api/orders/ORD-007/media` accepted with `captureMethod=recorded`. No console errors and no requests outside the app. `npm run dev:https` answered over HTTPS. Not tried on a physical phone or webcam.
+- **Suggested Git commit:** `feat(web): add camera label scanner and in-browser video recorder`

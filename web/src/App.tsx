@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router";
 import { AppShell } from "./components/AppShell";
 import { EmptyState, LinkButton, Spinner } from "./components/ui";
 import { useAuth } from "./lib/auth";
+import { DeviceCheckPage } from "./pages/DeviceCheckPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 
@@ -42,6 +43,7 @@ export const App = () => (
             <Route path="returns/new" element={<PlaceholderPage title="Nhận hàng hoàn" />} />
             <Route path="claims" element={<PlaceholderPage title="Khiếu nại" />} />
             <Route path="claims/:claimId" element={<PlaceholderPage title="Chi tiết khiếu nại" />} />
+            {import.meta.env.DEV && <Route path="dev/devices" element={<DeviceCheckPage />} />}
             <Route path="*" element={<NotFound />} />
         </Route>
     </Routes>
