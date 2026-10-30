@@ -24,7 +24,6 @@ export type EscalationCode =
     | "ORDER_ID_MISMATCH"
     | "KEY_ATTRIBUTE_UNVERIFIABLE"
     | "INSTRUCTION_TEXT_IN_FOOTAGE"
-    | "HIGH_VALUE_ORDER"
     | "WORKFLOW_ERROR";
 
 export interface EscalationReason {
@@ -229,14 +228,6 @@ export const validateEvidence = async (input: ValidationInput): Promise<Evidence
 
     if (input.analyses) validateAnalyses(input, checks, reason);
     if (input.comparison) validateComparison(input.comparison, checks, reason);
-
-    if (order.declaredValue >= env.HIGH_VALUE_THRESHOLD) {
-        reason({
-            code: "HIGH_VALUE_ORDER",
-            blocking: false,
-            message: `Declared value ${order.declaredValue} ${order.currency} is at or above the ${env.HIGH_VALUE_THRESHOLD} review threshold`,
-        });
-    }
 
     const blocking = reasons.some((r) => r.blocking);
     const pending = checks.some((c) => c.status === "pending");

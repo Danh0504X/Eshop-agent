@@ -27,8 +27,6 @@ export const createOrderSchema = z.object({
     }),
     expectedQuantity: z.number().int().min(1).max(10_000),
     expectedAccessories: z.array(z.string().trim().min(1).max(100)).max(50).default([]),
-    declaredValue: z.number().min(0).max(10_000_000),
-    currency: z.string().length(3).toUpperCase().default("USD"),
     customer: z
         .object({
             name: z.string().max(200).optional(),
@@ -82,14 +80,6 @@ export const markSubmittedSchema = z.object({
     externalReference: z.string().trim().max(200).optional(),
     note: z.string().trim().max(1000).optional(),
 });
-
-export const refundSchema = z
-    .object({
-        requestedCompensation: z.number().min(0).max(10_000_000),
-        actualRefund: z.number().min(0).max(10_000_000),
-        note: z.string().trim().max(500).optional(),
-    })
-    .strict();
 
 export const listClaimsQuery = z.object({
     status: z.enum(CLAIM_STATUSES).optional(),

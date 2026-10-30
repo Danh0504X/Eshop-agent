@@ -138,7 +138,6 @@ describe("GeminiPlanner function calling", () => {
 
         // Tools are declared from the registry (planner-visible only) with JSON schemas.
         const declared = requests[0].config.tools[0].functionDeclarations;
-        expect(declared.map((d) => d.name)).not.toContain("track_refund");
         expect(declared.find((d) => d.name === "lookup_order")?.parametersJsonSchema).toMatchObject({ type: "object" });
 
         // The model turn (with its thought signature) is replayed unchanged in the next request.

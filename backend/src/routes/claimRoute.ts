@@ -5,7 +5,6 @@ import {
     getOne,
     list,
     markSubmitted,
-    refund,
     reject,
     resolve,
 } from "../controllers/claim.controller";
@@ -22,6 +21,5 @@ router.post("/:claimId/approve", approve);
 router.post("/:claimId/reject", reject);
 router.post("/:claimId/mark-submitted", markSubmitted);
 router.post("/:claimId/resolve", resolve);
-router.post("/:claimId/refund", refund);
 
 export default router;

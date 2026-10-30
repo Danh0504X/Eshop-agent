@@ -43,8 +43,6 @@ export const lookupOrderTool = defineTool({
             },
             expectedQuantity: order.expectedQuantity,
             expectedAccessories: order.expectedAccessories,
-            declaredValue: order.declaredValue,
-            currency: order.currency,
             outboundEvidenceLinked: order.packingMedia.length > 0,
             returnEvidenceLinked: order.returnMedia.length > 0,
         };

@@ -20,6 +20,7 @@ import {
     disconnectTestDb,
     makeVideo,
     type TestUser,
+    useAdvisoryDemoProvider,
     type VideoKind,
 } from "./helpers";
 
@@ -46,7 +47,6 @@ interface Setup {
     outbound?: VideoKind | null;
     returned?: VideoKind | null;
     expectedQuantity?: number;
-    declaredValue?: number;
     planner?: "llm" | "deterministic";
 }
 
@@ -57,7 +57,6 @@ const setup = async (opts: Setup = {}) => {
         trackingCode: `TRK-AG-${seq}`,
         demoScenario: opts.scenario ?? "normal",
         expectedQuantity: opts.expectedQuantity ?? 1,
-        declaredValue: opts.declaredValue ?? 120,
     });
     if (opts.outbound !== null)
         await createMediaFromFile(
@@ -199,12 +198,12 @@ describe("FixIt agent with the deterministic planner (demo analysis)", () => {
         expect(claim).toBeNull();
     });
 
-    it("a high-value order with discrepancies gets both a draft claim and a review task", async () => {
-        spyProvider();
-        const { result, claim } = await inspect({ scenario: "mismatch", declaredValue: 1500 });
+    it("discrepancies plus an advisory reason get both a draft claim and a review task", async () => {
+        useAdvisoryDemoProvider();
+        const { result, claim } = await inspect({ scenario: "mismatch" });
         expect(claim?.status).toBe("pending_approval");
         expect(result.status).toBe("needs_review");
-        expect(result.escalation).toMatchObject({ blocking: false, reasons: ["HIGH_VALUE_ORDER"] });
+        expect(result.escalation).toMatchObject({ blocking: false, reasons: ["INSTRUCTION_TEXT_IN_FOOTAGE"] });
     });
 
     it("escalates when the vision API keeps failing, after bounded retries", async () => {
@@ -288,7 +287,6 @@ describe("FixIt agent with the LLM planner (mocked client)", () => {
         };
         expect(third.role).toBe("user");
         expect(third.content.filter((b) => b.type === "tool_result").map((b) => b.tool_use_id)).toEqual(["t3", "t4"]);
-        expect(requests[0].tools.map((t) => (t as { name: string }).name)).not.toContain("track_refund");
         expect(JSON.stringify(requests)).not.toMatch(/Pham Thi D|0933|Tran Phu/);
     });
 

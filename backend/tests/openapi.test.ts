@@ -24,7 +24,6 @@ const REQUIRED = [
     "post /api/claims/{claimId}/approve",
     "post /api/claims/{claimId}/reject",
     "get /api/claims/{claimId}/report",
-    "post /api/claims/{claimId}/refund",
     "get /api/health",
 ];
 

@@ -68,7 +68,7 @@ export const summarizeToolResult = (tool: string, data: Data): { headline: strin
             return {
                 headline: `order found: ${data.product?.name ?? "?"}${data.product?.model ? ` ${data.product.model}` : ""}${data.product?.color ? ` ${data.product.color}` : ""}, qty ${data.expectedQuantity}`,
                 details: [
-                    `accessories: ${(data.expectedAccessories ?? []).join(", ") || "none"} | declared value ${data.declaredValue} ${data.currency ?? ""}`,
+                    `accessories: ${(data.expectedAccessories ?? []).join(", ") || "none"}`,
                     `evidence linked: outbound=${data.outboundEvidenceLinked ? "yes" : "NO"} return=${data.returnEvidenceLinked ? "yes" : "NO"}`,
                 ],
             };

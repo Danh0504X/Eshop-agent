@@ -54,7 +54,6 @@ describe("orders", () => {
         warehouseId: "wh-1",
         product: { name: "Smart Watch", color: "silver" },
         expectedQuantity: 1,
-        declaredValue: 199,
     };
 
     it("creates an order and validates input", async () => {

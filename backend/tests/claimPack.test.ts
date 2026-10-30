@@ -5,7 +5,7 @@ import { Claim } from "../src/models/Claim";
 import { Inspection } from "../src/models/Inspection";
 import { MediaEvidence } from "../src/models/MediaEvidence";
 import { Order, type OrderDoc } from "../src/models/Order";
-import { buildClaimPack, trackRefund } from "../src/services/claimService";
+import { buildClaimPack } from "../src/services/claimService";
 import { compareAnalyses } from "../src/services/comparisonService";
 import { validateEvidence } from "../src/services/evidenceValidationService";
 import { buildReportModel, renderReportPdf } from "../src/services/reportService";
@@ -25,12 +25,10 @@ import {
 import { demoPair } from "./fixtures";
 
 let owner: TestUser;
-let employee: TestUser;
 
 beforeAll(async () => {
     await connectTestDb();
     owner = await createUser({ role: "owner", shopId: "shop-a" });
-    employee = await createUser({ role: "employee", shopId: "shop-a", warehouseIds: ["wh-1"] });
 });
 afterAll(disconnectTestDb);
 
@@ -128,7 +126,7 @@ describe("report and claim pack", () => {
         const pdf = await renderReportPdf(model, { compress: false });
         expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
         const raw = pdf.toString("latin1");
-        expect(raw).toContain(hex("120")); // positive control: declared value is rendered
+        expect(raw).toContain(hex("100")); // positive control: the product model (WH-100) is rendered
         for (const secret of ["0900", "0912", "Hai Ba", "Le Van"]) expect(raw).not.toContain(hex(secret));
     });
 
@@ -167,33 +165,6 @@ describe("report and claim pack", () => {
             buildClaimPack({ ...mismatchedId, principal: owner.principal, actorType: "agent" }),
         ).rejects.toMatchObject({
             message: expect.stringMatching(/blocking issues/),
-        });
-    });
-});
-
-describe("trackRefund", () => {
-    it("case 9: flags an actual refund lower than the requested compensation without claiming payment verification", async () => {
-        const ctx = await setup("missing_item");
-        const claim = await buildClaimPack({ ...ctx, principal: owner.principal, actorType: "agent" });
-
-        const updated = await trackRefund(owner.principal, claim.id, {
-            requestedCompensation: 120,
-            actualRefund: 80.5,
-        });
-        expect(updated.refund).toMatchObject({ discrepancyAmount: 39.5, flagged: true, paymentVerified: false });
-        expect(await AuditLog.countDocuments({ action: "claim.refund_recorded", claimId: claim.id })).toBe(1);
-
-        const matched = await trackRefund(owner.principal, claim.id, { requestedCompensation: 120, actualRefund: 120 });
-        expect(matched.refund?.flagged).toBe(false);
-    });
-
-    it("only lets owners record refund amounts", async () => {
-        const ctx = await setup("missing_item");
-        const claim = await buildClaimPack({ ...ctx, principal: owner.principal, actorType: "agent" });
-        await expect(
-            trackRefund(employee.principal, claim.id, { requestedCompensation: 1, actualRefund: 0 }),
-        ).rejects.toMatchObject({
-            code: "FORBIDDEN",
         });
     });
 });

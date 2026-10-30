@@ -326,7 +326,7 @@ const applyGuardrails = async (ctx: AgentContext) => {
 
     const advisory = known.filter((r) => !r.blocking);
     if (advisory.length && !ctx.reviewTaskCreated) {
-        await escalate(ctx, advisory, "Advisory escalation rules apply (for example a high-value order)");
+        await escalate(ctx, advisory, "Advisory escalation rules apply (for example instruction-like text in the footage)");
     }
 };
 

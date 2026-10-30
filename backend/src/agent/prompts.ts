@@ -66,7 +66,7 @@ How to work:
 - If evidence is missing, unusable or contradictory, or a tool reports escalation reasons, call notify_human with a
   specific reason instead of continuing. Do not call a tool just because it is next; call it because its result is needed.
 - Draft a claim (build_claim_pack) only after final verification passes with no blocking issues and the comparison
-  found material discrepancies. For high-value orders also call notify_human.
+  found material discrepancies. If final verification reports advisory reasons, also call notify_human.
 - If an analysis or comparison leaves something important unclear (an attribute or the product condition is uncertain
   or not verifiable, or confidence is low), you may call inspect_video_segment once for that question: pick a short
   range of the relevant video near the timestamps of the frames already cited, and ask one specific visual question.

@@ -6,7 +6,6 @@ import { inspectVideoSegmentTool } from "./inspectVideoSegment";
 import { linkMediaTool } from "./linkMedia";
 import { lookupOrderTool } from "./lookupOrder";
 import { notifyHumanTool } from "./notifyHuman";
-import { trackRefundTool } from "./trackRefund";
 import type { ToolDefinition } from "./types";
 import { validateEvidenceTool } from "./validateEvidence";
 
@@ -19,6 +18,5 @@ export const allTools: ToolDefinition<any>[] = [
     compareItemsTool,
     buildClaimPackTool,
     inspectVideoSegmentTool,
-    trackRefundTool,
     notifyHumanTool,
 ];

@@ -5,7 +5,7 @@ import type { MediaDoc } from "../models/MediaEvidence";
 import { Order, type OrderDoc } from "../models/Order";
 import type { AuthPrincipal } from "../types/auth";
 import { ApiError, notFound } from "../utils/errors";
-import { assertRole, assertScope } from "./accessService";
+import { assertScope } from "./accessService";
 import { recordAudit } from "./auditService";
 import type { ComparisonResult } from "./comparisonService";
 import type { EvidenceValidation } from "./evidenceValidationService";
@@ -90,7 +90,6 @@ export const buildClaimPack = async (input: ClaimPackInput): Promise<ClaimDoc> =
             evidenceReferences,
             uncertaintyNotes: model.uncertaintyNotes,
             analysisMode: inspection.analysisMode,
-            currency: order.currency,
             status: "draft",
             history: [{ by: input.actorType, to: "draft", reason: "Draft generated from inspection" }],
         }));
@@ -137,50 +136,5 @@ export const getClaimForPrincipal = async (principal: AuthPrincipal, claimId: st
     const claim = await Claim.findById(claimId);
     if (!claim) throw notFound("Claim");
     assertScope(principal, claim, "Claim");
-    return claim;
-};
-
-export interface RefundInput {
-    requestedCompensation: number;
-    actualRefund: number;
-    note?: string;
-}
-
-/**
- * Record amounts entered by an authorized user and flag discrepancies.
- * This does not verify any real payment: there is no authoritative payment integration.
- */
-export const trackRefund = async (principal: AuthPrincipal, claimId: string, input: RefundInput): Promise<ClaimDoc> => {
-    assertRole(principal, ["owner"], "record refund amounts");
-    const claim = await getClaimForPrincipal(principal, claimId);
-    const discrepancy = Math.round((input.requestedCompensation - input.actualRefund) * 100) / 100;
-    claim.set({
-        requestedCompensation: input.requestedCompensation,
-        actualRefund: input.actualRefund,
-        refund: {
-            discrepancyAmount: discrepancy,
-            flagged: discrepancy > 0,
-            note: input.note,
-            recordedBy: principal.userId,
-            recordedAt: new Date(),
-            paymentVerified: false,
-        },
-    });
-    claim.history.push({
-        by: principal.userId,
-        from: claim.status,
-        to: claim.status,
-        reason: `Refund recorded: requested ${input.requestedCompensation}, actual ${input.actualRefund}`,
-    });
-    await claim.save();
-    await recordAudit({
-        action: "claim.refund_recorded",
-        actorType: "user",
-        actorId: principal.userId,
-        shopId: claim.shopId,
-        orderId: claim.orderId,
-        claimId: claim.id,
-        details: { ...input, discrepancy, flagged: discrepancy > 0 },
-    });
     return claim;
 };

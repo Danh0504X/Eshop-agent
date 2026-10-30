@@ -13,8 +13,8 @@ const schema = z
 export const notifyHumanTool = defineTool({
     name: "notify_human",
     description:
-        "Create a human review task when evidence is insufficient, confidence is low, the order is high value, a tool keeps " +
-        "failing, or another escalation rule applies. The backend attaches the detected escalation reasons and findings.",
+        "Create a human review task when evidence is insufficient, confidence is low, a tool keeps failing, or another " +
+        "escalation rule applies. The backend attaches the detected escalation reasons and findings.",
     schema,
     plannerVisible: true,
     handler: async (args, ctx) => {

@@ -17,8 +17,6 @@ const OrderSchema = new Schema(
         },
         expectedQuantity: { type: Number, required: true, min: 1 },
         expectedAccessories: { type: [String], default: [] },
-        declaredValue: { type: Number, required: true, min: 0 },
-        currency: { type: String, default: "USD" },
         /** Personal data: never sent to the AI provider, redacted in exported reports. */
         customer: {
             name: { type: String },

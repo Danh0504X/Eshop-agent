@@ -14,6 +14,7 @@ import {
     disconnectTestDb,
     makeVideo,
     type TestUser,
+    useAdvisoryDemoProvider,
 } from "./helpers";
 
 let owner: TestUser;
@@ -36,13 +37,12 @@ const auth = (user: TestUser) => ({ Authorization: `Bearer ${user.token}` });
 
 let seq = 0;
 /** Run a real (demo-mode) inspection through the API and return the resulting claim id. */
-const draftClaim = async (opts: { declaredValue?: number } = {}) => {
+const draftClaim = async () => {
     seq++;
     const order = await createOrder({
         orderId: `ORD-CL-${seq}`,
         trackingCode: `TRK-CL-${seq}`,
         demoScenario: "mismatch",
-        declaredValue: opts.declaredValue ?? 120,
     });
     await createMediaFromFile(order, "outbound", await makeVideo("normal"), owner.principal.userId);
     await createMediaFromFile(order, "return", await makeVideo("normal"), owner.principal.userId);
@@ -158,14 +158,15 @@ describe("claim review API", () => {
         expect(approveAfter.status).toBe(409);
     });
 
-    it("closes the high-value review task when the owner decides the claim", async () => {
-        const { claimId, inspectionId, order } = await draftClaim({ declaredValue: 3000 });
+    it("closes the advisory review task when the owner decides the claim", async () => {
+        useAdvisoryDemoProvider();
+        const { claimId, inspectionId, order } = await draftClaim().finally(() => setVisionProvider(undefined));
         expect((await Inspection.findById(inspectionId))?.status).toBe("needs_review");
 
         await request(app)
             .post(`/api/claims/${claimId}/approve`)
             .set(auth(owner))
-            .send({ reason: "High-value claim reviewed" });
+            .send({ reason: "Claim and flagged footage reviewed" });
         const inspection = await Inspection.findById(inspectionId);
         expect(inspection?.status).toBe("completed");
         expect(inspection?.reviewTask).toMatchObject({
@@ -173,31 +174,6 @@ describe("claim review API", () => {
             resolutionNote: expect.stringMatching(/approved/),
         });
         expect((await Order.findById(order._id))?.inspectionStatus).toBe("completed");
-    });
-
-    it("case 9 via API: records a refund shortfall (owner only)", async () => {
-        const { claimId } = await draftClaim();
-        const body = { requestedCompensation: 150, actualRefund: 100 };
-        expect((await request(app).post(`/api/claims/${claimId}/refund`).set(auth(employee)).send(body)).status).toBe(
-            403,
-        );
-        expect(
-            (
-                await request(app)
-                    .post(`/api/claims/${claimId}/refund`)
-                    .set(auth(owner))
-                    .send({ ...body, actualRefund: -1 })
-            ).status,
-        ).toBe(400);
-
-        const res = await request(app).post(`/api/claims/${claimId}/refund`).set(auth(owner)).send(body);
-        expect(res.status).toBe(200);
-        expect(res.body.message).toMatch(/lower than the requested/);
-        expect(res.body.data.claim).toMatchObject({
-            requestedCompensation: 150,
-            actualRefund: 100,
-            refund: { discrepancyAmount: 50, flagged: true, paymentVerified: false },
-        });
     });
 
     it("hides other shops' claims", async () => {

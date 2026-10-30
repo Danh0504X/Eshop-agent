@@ -82,7 +82,6 @@ const EnvSchema = z
         FFMPEG_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
 
         CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
-        HIGH_VALUE_THRESHOLD: z.coerce.number().nonnegative().default(500),
         REQUIRE_VISIBLE_ORDER_ID: bool(true),
         MIN_FRAME_BRIGHTNESS: z.coerce.number().min(0).max(255).default(40),
         MIN_FRAME_SHARPNESS: z.coerce.number().nonnegative().default(15),

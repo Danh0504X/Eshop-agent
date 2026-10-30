@@ -36,18 +36,6 @@ const ClaimSchema = new Schema(
             privacyReviewRequired: { type: Boolean, default: true },
             notes: [String],
         },
-        currency: { type: String, default: "USD" },
-        requestedCompensation: { type: Number },
-        actualRefund: { type: Number },
-        refund: {
-            discrepancyAmount: Number,
-            flagged: Boolean,
-            note: String,
-            recordedBy: { type: Schema.Types.ObjectId, ref: "User" },
-            recordedAt: Date,
-            /** Always false in this MVP: there is no authoritative payment integration. */
-            paymentVerified: { type: Boolean, default: false },
-        },
         status: { type: String, enum: CLAIM_STATUSES, default: "draft" },
         approval: {
             decision: { type: String, enum: ["approved", "rejected"] },

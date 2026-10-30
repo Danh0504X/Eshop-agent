@@ -54,7 +54,7 @@ const changeStatus = async (
 };
 
 /**
- * Deciding the claim is the human review for advisory escalations (e.g. high-value orders),
+ * Deciding the claim is the human review for advisory escalations (e.g. instruction-like text in the footage),
  * so an open non-blocking review task on the inspection is resolved with the decision.
  */
 const resolveAdvisoryReview = async (principal: AuthPrincipal, claim: ClaimDoc, note: string) => {

@@ -402,28 +402,6 @@ export const openApiDocument = {
                 },
             },
         },
-        "/api/claims/{claimId}/refund": {
-            post: {
-                tags: ["Claims"],
-                summary: "Record requested compensation and actual refund (owner only); flags shortfalls",
-                description:
-                    "Amounts are entered by a person. No payment is verified (paymentVerified is always false).",
-                parameters: [pathParam("claimId", id)],
-                requestBody: jsonBody({
-                    type: "object",
-                    required: ["requestedCompensation", "actualRefund"],
-                    properties: {
-                        requestedCompensation: { type: "number", minimum: 0 },
-                        actualRefund: { type: "number", minimum: 0 },
-                        note: { type: "string" },
-                    },
-                }),
-                responses: {
-                    ...ok("Recorded", { type: "object", properties: { claim: ref("Claim") } }),
-                    ...errors(400, 401, 403, 404),
-                },
-            },
-        },
     },
     components: {
         securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
@@ -460,7 +438,7 @@ export const openApiDocument = {
             },
             CreateOrder: {
                 type: "object",
-                required: ["orderId", "trackingCode", "warehouseId", "product", "expectedQuantity", "declaredValue"],
+                required: ["orderId", "trackingCode", "warehouseId", "product", "expectedQuantity"],
                 properties: {
                     orderId: { type: "string", example: "ORD-100" },
                     trackingCode: { type: "string", example: "TRK-100" },
@@ -478,8 +456,6 @@ export const openApiDocument = {
                     },
                     expectedQuantity: { type: "integer", minimum: 1 },
                     expectedAccessories: { type: "array", items: { type: "string" } },
-                    declaredValue: { type: "number", minimum: 0 },
-                    currency: { type: "string", example: "USD" },
                     customer: {
                         type: "object",
                         description: "Personal data: never sent to the AI provider; excluded from reports.",
@@ -604,9 +580,6 @@ export const openApiDocument = {
                     aiGenerated: { type: "boolean" },
                     analysisMode: { type: "string" },
                     redaction: { type: "object" },
-                    requestedCompensation: { type: "number" },
-                    actualRefund: { type: "number" },
-                    refund: { type: "object" },
                     approval: { type: "object" },
                     history: { type: "array", items: { type: "object" } },
                     reportUrl: { type: "string", nullable: true },

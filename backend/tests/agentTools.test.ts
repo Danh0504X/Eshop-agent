@@ -35,13 +35,12 @@ afterEach(() => {
 });
 
 let seq = 0;
-const newContext = async (opts: { scenario?: string; withReturn?: boolean; declaredValue?: number } = {}) => {
+const newContext = async (opts: { scenario?: string; withReturn?: boolean } = {}) => {
     seq++;
     const order = await createOrder({
         orderId: `ORD-TOOL-${seq}`,
         trackingCode: `TRK-TOOL-${seq}`,
         demoScenario: opts.scenario ?? "normal",
-        declaredValue: opts.declaredValue ?? 120,
     });
     await createMediaFromFile(order, "outbound", await makeVideo("normal"), owner.principal.userId);
     if (opts.withReturn !== false)
@@ -61,9 +60,8 @@ const newContext = async (opts: { scenario?: string; withReturn?: boolean; decla
 const run = async (ctx: AgentContext, name: string, args: unknown = {}) => executeTool(ctx, name, args);
 
 describe("tool registry guards", () => {
-    it("exposes planner tools with object schemas and hides track_refund", () => {
+    it("exposes the planner tools with object schemas", () => {
         const defs = plannerToolDefinitions();
-        expect(defs.map((d) => d.name)).not.toContain("track_refund");
         expect(defs).toHaveLength(9);
         for (const d of defs) expect(d.input_schema.type).toBe("object");
     });
@@ -79,12 +77,6 @@ describe("tool registry guards", () => {
         expect(await run(ctx, "lookup_order", { orderId: "x", shell: "rm -rf /" })).toMatchObject({
             ok: false,
             error: { code: "INVALID_ARGUMENTS" },
-        });
-        expect(
-            await run(ctx, "track_refund", { claimId: "a".repeat(24), requestedCompensation: 1, actualRefund: 0 }),
-        ).toMatchObject({
-            ok: false,
-            error: { code: "NOT_PERMITTED" },
         });
         expect(ctx.state).toBe("RECEIVED");
     });

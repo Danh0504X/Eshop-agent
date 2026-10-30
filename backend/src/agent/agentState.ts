@@ -18,7 +18,6 @@ export const TOOL_NAMES = [
     "compare_items",
     "build_claim_pack",
     "inspect_video_segment",
-    "track_refund",
     "notify_human",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];

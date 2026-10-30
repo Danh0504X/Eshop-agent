@@ -168,3 +168,20 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Tests executed:** typecheck OK; `npm test` 161 passed, 2 skipped; backend and frontend build OK. New tests (scripted Gemini planner + demo vision, no network): full loop ending in a HIGH `product_condition_change` claim citing `RET-S1-02/03`; claim refused right after new evidence; planner stopped by the AI budget; duplicate vs different segments; segment and re-analysis budgets; re-analysis rules; baseline frames intact and verification invalidated.
 - **Real API test:** not run (free-tier quota).
 - **Suggested Git commit:** `feat(agent): bounded adaptive re-inspection loop with budgets`
+
+---
+
+## Scan-first redesign B1 — Remove monetary fields and refund tracking
+
+- **Files changed:** `backend/src/models/Order.ts`, `backend/src/models/Claim.ts`, `backend/src/validators/schemas.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/src/services/evidenceValidationService.ts`, `backend/src/services/reviewService.ts`, `backend/src/services/claimService.ts`, `backend/src/services/claimReviewService.ts`, `backend/src/services/reportService.ts`, `backend/src/controllers/claim.controller.ts`, `backend/src/routes/claimRoute.ts`, `backend/src/docs/openapi.ts`, `backend/src/agent/agentState.ts`, `backend/src/agent/agentTrace.ts`, `backend/src/agent/fixitAgent.ts`, `backend/src/agent/prompts.ts`, `backend/src/agent/tools/index.ts`, `backend/src/agent/tools/types.ts`, `backend/src/agent/tools/lookupOrder.ts`, `backend/src/agent/tools/notifyHuman.ts`, `backend/scripts/seed.ts`, tests (`helpers`, `agentTools`, `claimApi`, `claimPack`, `evidenceValidation`, `fixitAgent`, `foundation`, `geminiPlanner`, `inspectionApi`, `openapi`)
+- **Files removed:** `backend/src/agent/tools/trackRefund.ts`
+- **Previous behavior:** orders required `declaredValue` (and `currency`); a value at or above `HIGH_VALUE_THRESHOLD` (500, compared without regard to currency) added the advisory `HIGH_VALUE_ORDER`, so the inspection ended in `needs_review`. Owners recorded requested and actual refund amounts with `POST /api/claims/:id/refund` (tool `track_refund`, hidden from the planner), which flagged shortfalls.
+- **New behavior:**
+  - The inspection compares the product only. Orders have no `declaredValue` or `currency`; `POST /api/orders` silently drops those keys if a client still sends them.
+  - `HIGH_VALUE_ORDER` and `HIGH_VALUE_THRESHOLD` are gone. The remaining advisory escalation is `INSTRUCTION_TEXT_IN_FOOTAGE`; the planner prompt now says to call `notify_human` when final verification reports advisory reasons.
+  - Refund tracking is removed: no endpoint, no tool, no `currency` / `requestedCompensation` / `actualRefund` / `refund` on claims. The tool registry has 9 tools, all planner-visible.
+  - `lookup_order`, the console trace and the PDF report no longer show a declared value.
+- **Compatibility impact:** existing MongoDB documents keep the old fields; Mongoose ignores them (`npm run seed -- --reset` gives clean demo data). `HIGH_VALUE_THRESHOLD` in an existing `.env` is ignored. The old `frontend/` refund form now receives 404 until its minimal update. Required scenario #9 (refund shortfall) is intentionally dropped.
+- **Tests executed:** typecheck OK; `npm test` 158 passed, 2 skipped (161 before: the 3 refund tests were removed). Tests that relied on high-value orders now use `useAdvisoryDemoProvider()` (demo vision plus instruction-like text) and still cover claim + advisory review task, closing the advisory review on a claim decision, and refusing a retry while a draft claim is undecided. The PDF privacy test's positive control is now the product model. Build OK.
+- **Real API test:** not applicable (no AI behaviour changed).
+- **Suggested Git commit:** `refactor(orders): remove declared value, high-value rule and refund tracking`
