@@ -257,3 +257,17 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Compatibility impact:** this UI has no scanner, so every order and video it creates is marked as a manual entry. The new `web/` frontend replaces it for the scan-first workflow.
 - **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `frontend/` OK. The request sequences it uses (manual packing scan → create order; packing/return scan → upload with `captureMethod=file`) are covered by the backend API tests. Not clicked through in a browser.
 - **Suggested Git commit:** `fix(frontend): adapt the demo UI to scan-bound orders and evidence`
+
+---
+
+## Scan-first redesign W1 — New `web/` frontend: app shell
+
+- **Files added:** `web/package.json`, `web/package-lock.json`, `web/tsconfig.json`, `web/vite.config.ts`, `web/index.html`, `web/.prettierrc`, `web/src/main.tsx`, `web/src/App.tsx`, `web/src/styles.css`, `web/src/lib/{api,auth,health,types}.ts(x)`, `web/src/components/{AppShell,ModeChips,icons,ui}.tsx`, `web/src/pages/{LoginPage,PlaceholderPage}.tsx`
+- **What it is:** a separate, production-style UI for the scan-first workflow (the old `frontend/` stays as the demo UI). React 19 + TypeScript + Vite like `frontend/`, plus `react-router` for real URLs. Vietnamese UI, plain CSS with design tokens, inline SVG icons, no UI library. Dev server on port 5174, proxying `/api` to the backend.
+- **Behaviour in this step:**
+  - Login (Vietnamese errors; dev-only quick-fill for the seeded accounts), token stored under its own key, automatic return to login when the backend rejects the token.
+  - Responsive shell: on screens of 900 px and wider, a sidebar with the two main actions (Thêm đơn, Nhận hàng hoàn) and navigation (Đơn hàng, Khiếu nại); below that, a top bar and a bottom tab bar for phones.
+  - Always-visible mode chips from `GET /api/health`: "Dữ liệu demo" or "AI thật · Gemini", and "Tải file từ máy (demo)" when `ALLOW_FILE_EVIDENCE` is on; a banner when the backend or its database is unreachable.
+  - Routes for orders, new order, order detail, returns and claims exist; their pages are placeholders replaced in the next steps. No agent logs or raw data are shown anywhere.
+- **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `web/` OK. Ran the app against a throwaway in-memory MongoDB seeded with the demo data (backend on 4100 with `DEMO_MODE=true`) and drove it in headless Chrome: login page, real login through the form, orders and returns routes and the 404 page at 1280x800 and 390x844, with no console errors.
+- **Suggested Git commit:** `feat(web): scaffold the new frontend with login and responsive app shell`
