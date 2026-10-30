@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { LabelScanner, type ScanMethod } from "../components/LabelScanner";
+import { LabelScanner } from "../components/LabelScanner";
 import { Button, Card, PageHeader } from "../components/ui";
 import { formatDuration, formatSize, VideoCapture, type Capture } from "../components/VideoCapture";
 import { useHealth } from "../lib/health";
+import type { ScanMethod } from "../lib/types";
 
 const METHOD_LABEL: Record<ScanMethod, string> = {
     camera: "Quét bằng camera",

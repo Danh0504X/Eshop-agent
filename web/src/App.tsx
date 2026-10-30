@@ -5,6 +5,7 @@ import { EmptyState, LinkButton, Spinner } from "./components/ui";
 import { useAuth } from "./lib/auth";
 import { DeviceCheckPage } from "./pages/DeviceCheckPage";
 import { LoginPage } from "./pages/LoginPage";
+import { NewOrderPage } from "./pages/NewOrderPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 
 const RequireAuth = ({ children }: { children: ReactNode }) => {
@@ -38,7 +39,7 @@ export const App = () => (
         >
             <Route index element={<Navigate to="/orders" replace />} />
             <Route path="orders" element={<PlaceholderPage title="Đơn hàng" />} />
-            <Route path="orders/new" element={<PlaceholderPage title="Thêm đơn hàng" />} />
+            <Route path="orders/new" element={<NewOrderPage />} />
             <Route path="orders/:orderId" element={<PlaceholderPage title="Chi tiết đơn" />} />
             <Route path="returns/new" element={<PlaceholderPage title="Nhận hàng hoàn" />} />
             <Route path="claims" element={<PlaceholderPage title="Khiếu nại" />} />

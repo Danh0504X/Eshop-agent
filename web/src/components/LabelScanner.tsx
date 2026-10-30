@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { detectCodes, TRACKING_CODE, type DetectedCode } from "../lib/barcode";
 import { useCamera } from "../lib/camera";
+import type { ScanMethod } from "../lib/types";
 import { IconUpload } from "./icons";
 import { Alert, Button, Spinner } from "./ui";
-
-/** How the tracking code reached the app; sent to the backend with the scan. */
-export type ScanMethod = "camera" | "image_file" | "manual";
 
 /** A camera read is accepted only after the same code shows up in this many consecutive frames. */
 const STABLE_READS = 2;

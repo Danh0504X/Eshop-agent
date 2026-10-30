@@ -11,6 +11,56 @@ export interface User {
     warehouseIds: string[];
 }
 
+export type ScanPurpose = "packing" | "return";
+export type ScanMethod = "camera" | "image_file" | "manual";
+
+/** A shipping-label scan recorded by the backend; it authorises the next step for that tracking code. */
+export interface Scan {
+    id: string;
+    code: string;
+    purpose: ScanPurpose;
+    method: ScanMethod;
+    manualEntry: boolean;
+    orderId: string | null;
+    scannedAt: string;
+    expiresAt: string;
+}
+
+export interface Order {
+    _id: string;
+    orderId: string;
+    trackingCode: string;
+    warehouseId: string;
+    product: { name: string; description?: string; sku?: string; model?: string; color?: string };
+    expectedQuantity: number;
+    expectedAccessories: string[];
+    trackingScan?: { method?: ScanMethod; manualEntry?: boolean; scannedAt?: string };
+    /** Owners only. */
+    customer?: { name?: string; phone?: string; address?: string };
+    packingMedia: string[];
+    returnMedia: string[];
+    inspectionStatus: string;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface Media {
+    _id: string;
+    type: "outbound" | "return";
+    status: string;
+    capture?: { scanMethod: ScanMethod; manualEntry?: boolean; captureMethod: "recorded" | "file" };
+    fileUrl: string;
+}
+
+export interface NewOrderInput {
+    scanId: string;
+    warehouseId: string;
+    product: { name: string; description?: string; sku?: string; model?: string; color?: string };
+    expectedQuantity: number;
+    expectedAccessories: string[];
+    customer?: { name?: string; phone?: string; address?: string };
+}
+
 export interface Health {
     status: "ok" | "degraded";
     database: string;

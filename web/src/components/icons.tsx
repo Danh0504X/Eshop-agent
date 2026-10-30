@@ -77,6 +77,12 @@ export const IconUpload = (props: IconProps) => (
     </Icon>
 );
 
+export const IconCheck = (props: IconProps) => (
+    <Icon {...props}>
+        <path d="M20 6L9 17l-5-5" />
+    </Icon>
+);
+
 export const IconChevronLeft = (props: IconProps) => (
     <Icon {...props}>
         <path d="M15 18l-6-6 6-6" />
