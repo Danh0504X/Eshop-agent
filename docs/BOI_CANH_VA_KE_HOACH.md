@@ -33,7 +33,8 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 3-4. extract_frames ×2     FFmpeg: 8 frame/video, đo sáng/nét, tính liên tục → cổng chất lượng sớm
 5-6. analyze_item ×2       Gemini mô tả TỪNG video riêng (JSON có cấu trúc, mỗi thuộc tính observed/uncertain/not_visible)
                            2 lượt gọi chạy đồng thời; bỏ frame tối/mờ; dùng lại kết quả tốt nếu video không đổi
-7. compare_items           CODE so sánh 2 bản mô tả → findings
+7. compare_items           CODE so sánh 2 bản mô tả → findings; khác chữ ở tên/màu thì chưa tính là sai lệch
+7b. verify_product_match   chỉ khi tên/màu khác chữ: Gemini xem frame của CẢ 2 video trong 1 lần gọi → same / different / uncertain
 8. validate_evidence (2)   kiểm tra cuối: confidence, ảnh dùng được, thuộc tính then chốt
 9. build_claim_pack        chỉ khi không có lý do chặn và có sai lệch đáng kể
 10. notify_human           khi có lý do chặn hoặc advisory
@@ -45,7 +46,8 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
   - Đơn hàng chỉ làm mốc cho số lượng thấy trong video đóng gói.
   - Chỉ so một thuộc tính khi **cả hai bên đều `observed`**.
   - **Sai lệch đáng kể** = mức ≥ medium **và** `observed`. Logic nằm ở [comparisonService.ts](../backend/src/services/comparisonService.ts).
-- **Gemini chỉ được gọi ở bước 5–6.** Mọi so sánh và quyết định đều là quy tắc trong code.
+  - **Tên và màu khác chữ** chỉ thành sai lệch khi `verify_product_match` trả về `different`; `same` thì bỏ; `uncertain` hoặc không chạy được thì chuyển người xem, không tạo khiếu nại. **Mã model in trên sản phẩm** khác nhau vẫn báo sai lệch ngay, Gemini không xóa được.
+- **Gemini chỉ được gọi ở bước 5–6 và 7b.** Mọi so sánh và quyết định đều là quy tắc trong code; ở 7b Gemini chỉ trả lời có phải cùng sản phẩm không.
 - **Chế độ `AGENT_PLANNER=llm`:** Gemini tự chọn tool qua function calling ([geminiPlanner.ts](../backend/src/agent/planners/geminiPlanner.ts)), và có thêm **vòng soi lại** `inspect_video_segment` (tối đa 3 đoạn, mỗi đoạn ≤ 10 s; tối đa 16 lượt AI). Chế độ `deterministic` **không** bao giờ soi lại.
 - **Log terminal:** mỗi lần kiểm tra in ra:
   - `START`
@@ -93,13 +95,15 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 | `74ada57` | `web/`: danh sách đơn, chi tiết đơn kèm video, màn hình Nhận hàng hoàn |
 | `e997079` | Backend: bỏ log hỏi tiến độ khỏi terminal |
 | `eb80520` | `web/`: nút Kiểm tra bằng AI, tiến trình và kết quả trên trang đơn |
-| (chưa commit) | Agent: tăng tốc `analyze_item`: thinking `LOW`, phân tích 2 video đồng thời, bỏ frame tối/mờ, dùng lại kết quả khi video không đổi |
+| `98c2987` | Agent: tăng tốc `analyze_item`: thinking `LOW`, phân tích 2 video đồng thời, bỏ frame tối/mờ, dùng lại kết quả khi video không đổi |
+| `27ce961` | Giữ lời giải thích của Google trong lỗi 402 và các lỗi client khác của Gemini |
+| (chưa commit, nhánh `feature/product-match-verification`) | Agent: sửa lỗi bất đối xứng tên sản phẩm theo 3 lớp, thêm tool `verify_product_match` |
 
 **Phát hiện quan trọng trong quá trình làm:**
 - **Lỗ hổng của B3, đã sửa ở B4:** quét `packing` một mã đã có đơn từng trả lỗi 409, nên không còn cách nào bổ sung video đóng gói cho đơn đó.
 - **Video WebM quay bằng `MediaRecorder` không ghi độ dài trong header** (`duration=N/A`). `probeVideo` giờ tính độ dài từ timestamp của packet; đã kiểm chứng với file Chrome quay thật: 3,2 s.
 - **Chrome báo hỗ trợ codec VP9 nhưng quay ra file rỗng (0 byte).** App giờ ưu tiên VP8, và không cho dùng bản quay rỗng.
-- **Backend:** 187 test pass, 3 skip (2 test gọi API thật, 1 test kiểm tra thời gian quay đang tắt).
+- **Backend:** 206 test pass, 3 skip (2 test gọi API thật, 1 test kiểm tra thời gian quay đang tắt).
 
 ---
 
@@ -111,10 +115,11 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
    - Chỉnh trace cho dễ theo dõi và debug, ví dụ: khối tóm tắt quyết định cuối, chi tiết từng finding khi so sánh, thời gian của từng bước.
    - **Còn chờ:** dùng cặp video thật hay video seed. Video seed chỉ là hình mẫu tổng hợp, nên kết quả gần như chắc chắn là "cần người xem". Lần chạy này tốn quota Gemini, khoảng 2 lượt AI với planner `deterministic`.
    - **Đo đợt tăng tốc `analyze_item`:** chưa đo với Gemini thật. So các dòng `Gemini Vision model (...) replied in ...` trên cùng một cặp video, và so cả chất lượng đọc ở `LOW` với mức cũ.
-2. **Sửa lỗi bất đối xứng tên sản phẩm.** Gemini mô tả 2 video trong 2 lần gọi độc lập, nên cùng một sản phẩm có thể bị gọi bằng hai tên khác nhau và bị tính là sai lệch. Code hiện so chuỗi tuyệt đối ở [comparisonService.ts](../backend/src/services/comparisonService.ts).
-   - **Lớp 1, prompt:** `productType` chỉ là một danh từ chung tiếng Anh; `model` chỉ chép từ chữ in thấy trong frame, không lấy từ checklist.
-   - **Lớp 2, code so sánh:** ưu tiên khớp model; bỏ tên brand ở đầu model; so `productType` theo từ; bỏ dấu tiếng Việt bằng chuẩn hóa Unicode thay vì xóa ký tự. Không cho phép kiểu "chuỗi này chứa chuỗi kia" với model, để `SW-200` và `SW-200-LITE` vẫn bị bắt là sai lệch.
-   - **Lớp 3, xác minh bằng hình:** khi vẫn thấy khác, thêm tool `verify_product_match` cho Gemini xem ảnh của cả 2 video trong cùng một lần gọi, trả về `same` / `different` / `uncertain`. Code vẫn là bên quyết định mức độ và có tạo claim hay không.
+2. **Lỗi bất đối xứng tên sản phẩm: đã làm xong code, còn chờ chạy với video thật.** Ca thật: `display module` và `OLED display module`, cùng một sản phẩm, từng bị tạo khiếu nại nháp.
+   - **Lớp 1, prompt:** `productType` là cụm danh từ chung ngắn; `color` là một từ trong danh sách màu cơ bản; `model` chỉ chép từ chữ in thấy trong frame; thùng đang mở khi quay không tính là `opened_or_tampered`.
+   - **Lớp 2, code so sánh:** so `productType` theo từ, bỏ dấu, số nhiều và từ đệm; so màu theo tập màu nhắc tới; bỏ tên brand ở đầu model. `SW-200` và `SW-200-LITE` vẫn là sai lệch; `display module` và `OLED display module` chuyển sang lớp 3 chứ không tự coi là khớp.
+   - **Lớp 3, xác minh bằng hình:** tool `verify_product_match` như mô tả ở mục 2.
+   - **Cần kiểm chứng:** cặp video hiện tại phải ra khớp, và một cặp sản phẩm khác thật phải vẫn bị phát hiện.
 3. **Giảm chi phí AI:**
    - **Xong:** thinking level `LOW`, không gửi frame tối hoặc mờ, dùng lại kết quả khi kiểm tra lại
    - **Còn lại:** dừng sớm nếu video đóng gói đã dính lỗi chặn
