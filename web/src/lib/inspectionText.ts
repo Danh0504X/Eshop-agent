@@ -14,6 +14,7 @@ export const ESCALATION_TEXT: Record<string, string> = {
     ANALYSIS_UNUSABLE: "AI không dùng được khung hình của video để phân tích.",
     LOW_CONFIDENCE: "Độ tin cậy của AI thấp hơn ngưỡng cho phép.",
     KEY_ATTRIBUTE_UNVERIFIABLE: "Không xác minh được số lượng hoặc hộp có hàng hay không từ video.",
+    PRODUCT_MATCH_UNVERIFIED: "AI chưa xác nhận được sản phẩm trong 2 video có giống nhau không.",
     INSTRUCTION_TEXT_IN_FOOTAGE: "Trong video có chữ giống lệnh gửi cho AI; AI đã bỏ qua, cần người xem lại.",
     WORKFLOW_ERROR: "Quy trình kiểm tra dừng giữa chừng (ví dụ lỗi khi gọi AI).",
 };
@@ -66,6 +67,12 @@ const ATTRIBUTE_TEXT: Record<string, string> = {
     Colour: "Màu sắc",
     "Packaging condition": "Tình trạng bao bì",
     "Product condition": "Tình trạng sản phẩm",
+};
+
+export const MATCH_VERDICT: Record<string, string> = {
+    same: "giống nhau",
+    different: "khác nhau",
+    uncertain: "chưa chắc",
 };
 
 export const attributeText = (attribute: string): string =>

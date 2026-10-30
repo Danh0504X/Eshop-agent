@@ -75,6 +75,7 @@ export interface Inspection {
     workflowState: string;
     analysisMode: "real" | "demo";
     comparison?: { findings: Finding[]; unverifiedAttributes: string[] };
+    productMatch?: { checks: Array<{ label: string; verdict: string }> };
     frameReferences: Array<{ frameId: string; imageUrl: string | null }>;
     escalation?: { reasons: string[] };
     reviewTask?: { status?: string; reasons?: string[] };

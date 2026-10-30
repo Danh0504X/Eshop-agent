@@ -4,6 +4,7 @@ import {
     attributeText,
     ESCALATION_TEXT,
     FINDING_TITLE,
+    MATCH_VERDICT,
     observationText,
     PROGRESS_STEPS,
     progressIndex,
@@ -90,6 +91,15 @@ const Result = ({ inspection }: { inspection: Inspection }) => {
                         ))}
                     </ul>
                 </div>
+            )}
+            {inspection.productMatch && (
+                <p className="evidence-meta">
+                    AI đã so trực tiếp khung hình của 2 video:{" "}
+                    {inspection.productMatch.checks
+                        .map((c) => `${attributeText(c.label)} ${MATCH_VERDICT[c.verdict] ?? c.verdict}`)
+                        .join(", ")}
+                    .
+                </p>
             )}
             {unverified.length > 0 && (
                 <p className="evidence-meta">Chưa xác minh được: {unverified.map(attributeText).join(", ")}.</p>
