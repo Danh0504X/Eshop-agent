@@ -186,6 +186,19 @@ describe("FixIt agent with the deterministic planner (demo analysis)", () => {
         expect(provider.calls).toBe(0);
     });
 
+    it("a video uploaded without a label scan escalates before any AI call", async () => {
+        const provider = spyProvider();
+        const { order, inspection } = await setup({ returned: null });
+        await createMediaFromFile(order, "return", await makeVideo("normal"), owner.principal.userId, {
+            scanned: false,
+        });
+        const result = await runInspection(inspection.id, { planner: new DeterministicPlanner() });
+        expect(result.status).toBe("needs_review");
+        expect(result.escalation?.reasons).toContain("EVIDENCE_NOT_SCANNED");
+        expect(result.recommendedAction).toMatch(/Scan the order's label/);
+        expect(provider.calls).toBe(0);
+    });
+
     it("low model confidence escalates instead of concluding", async () => {
         spyProvider();
         const { result, claim } = await inspect({ scenario: "low_confidence" });

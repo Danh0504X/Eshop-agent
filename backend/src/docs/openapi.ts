@@ -118,11 +118,12 @@ export const openApiDocument = {
         "/api/scans": {
             post: {
                 tags: ["Scans"],
-                summary: "Record a shipping-label scan (packing: before creating the order; return: finds the order)",
+                summary:
+                    "Record a shipping-label scan (packing: create the order or add its video; return: finds the order)",
                 description:
                     "Every order and evidence video is bound to a scan of its label instead of the AI reading the code " +
-                    "from footage. A scan expires after SCAN_SESSION_TTL_MINUTES. Packing scans of a code that already " +
-                    "has an order return 409 (with the order ID when the caller may open it).",
+                    "from footage. A scan expires after SCAN_SESSION_TTL_MINUTES. A packing scan of a code that already has " +
+                    "an order returns that order (to add or replace its packing video); it cannot create a second order.",
                 requestBody: jsonBody(ref("CreateScan")),
                 responses: {
                     ...ok(
@@ -202,10 +203,15 @@ export const openApiDocument = {
             },
             post: {
                 tags: ["Evidence"],
-                summary: "Upload an outbound or return evidence video",
+                summary: "Upload an outbound or return evidence video, bound to a scan of the order's label",
                 description:
-                    "Accepted: mp4, mov, webm, mkv, avi (content is verified, not just the extension). Existing evidence is never " +
-                    "overwritten silently: replacing requires replaceExisting=true and a replacementReason; the old file is kept as superseded.",
+                    "Accepted: mp4, mov, webm, mkv, avi (content is verified, not just the extension). Every video needs an unused " +
+                    "scan (POST /api/scans) of this order's tracking code made by the uploader: a packing scan for outbound, a " +
+                    "return scan for return videos. captureMethod=recorded means filmed in the app after the scan (the check " +
+                    "that such a video is not longer than the time since the scan is temporarily disabled). " +
+                    "captureMethod=file attaches an existing file and is only " +
+                    "accepted when ALLOW_FILE_EVIDENCE is on (demo). Existing evidence is never overwritten silently: replacing " +
+                    "requires replaceExisting=true and a replacementReason; the old file is kept as superseded.",
                 parameters: [pathParam("orderId")],
                 requestBody: {
                     required: true,
@@ -213,10 +219,14 @@ export const openApiDocument = {
                         "multipart/form-data": {
                             schema: {
                                 type: "object",
-                                required: ["file", "type"],
+                                required: ["file", "type", "scanId", "captureMethod"],
                                 properties: {
                                     file: { type: "string", format: "binary" },
                                     type: { type: "string", enum: ["outbound", "return"] },
+                                    scanId: id,
+                                    captureMethod: { type: "string", enum: ["recorded", "file"] },
+                                    recordingStartedAt: { type: "string", format: "date-time" },
+                                    recordingEndedAt: { type: "string", format: "date-time" },
                                     replaceExisting: { type: "boolean" },
                                     replacementReason: { type: "string" },
                                 },
@@ -446,6 +456,11 @@ export const openApiDocument = {
                     analysisMode: { type: "string", enum: ["real", "demo"] },
                     aiModel: { type: "string", nullable: true },
                     planner: { type: "string" },
+                    allowFileEvidence: {
+                        type: "boolean",
+                        description:
+                            "true: evidence may be attached as a file (demo); false: it must be recorded in the app",
+                    },
                 },
             },
             Principal: {
@@ -567,6 +582,18 @@ export const openApiDocument = {
                     sizeBytes: { type: "integer" },
                     sha256: { type: "string" },
                     metadata: { type: "object" },
+                    capture: {
+                        type: "object",
+                        properties: {
+                            scanId: { type: "string" },
+                            scanMethod: { type: "string", enum: ["camera", "image_file", "hand_scanner", "manual"] },
+                            manualEntry: { type: "boolean" },
+                            scannedAt: { type: "string", format: "date-time" },
+                            captureMethod: { type: "string", enum: ["recorded", "file"] },
+                            recordingStartedAt: { type: "string", format: "date-time" },
+                            recordingEndedAt: { type: "string", format: "date-time" },
+                        },
+                    },
                     frames: {
                         type: "array",
                         items: {

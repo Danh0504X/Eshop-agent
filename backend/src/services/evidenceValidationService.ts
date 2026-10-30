@@ -21,6 +21,7 @@ export type EscalationCode =
     | "ANALYSIS_UNUSABLE"
     | "LOW_CONFIDENCE"
     | "ORDER_ID_MISMATCH"
+    | "EVIDENCE_NOT_SCANNED"
     | "KEY_ATTRIBUTE_UNVERIFIABLE"
     | "INSTRUCTION_TEXT_IN_FOOTAGE"
     | "WORKFLOW_ERROR";
@@ -105,6 +106,31 @@ export const validateEvidence = async (input: ValidationInput): Promise<Evidence
             });
             continue;
         }
+
+        // The label scan, not the footage, is what ties a video to this order.
+        if (!media.capture?.scanId) {
+            checks.push({
+                name: "label_scan",
+                evidenceType: type,
+                status: "fail",
+                detail: "Not uploaded through a scan of the order's label",
+            });
+            reason({
+                code: "EVIDENCE_NOT_SCANNED",
+                blocking: true,
+                evidenceType: type,
+                message: `The ${LABEL[type]} was not uploaded through a scan of the order's shipping label`,
+            });
+            continue;
+        }
+        checks.push({
+            name: "label_scan",
+            evidenceType: type,
+            status: "pass",
+            detail: media.capture.manualEntry
+                ? "Tracking code typed by hand (label could not be scanned)"
+                : `Label scanned (${media.capture.scanMethod})`,
+        });
 
         if (!(await storage().exists(media.storageKey))) {
             checks.push({

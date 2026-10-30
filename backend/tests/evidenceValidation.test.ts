@@ -77,6 +77,17 @@ describe("validateEvidence", () => {
         expect(mismatch).toMatchObject({ blocking: true, evidenceType: "return" });
     });
 
+    it("blocks a video that was not uploaded through a scan of the order's label", async () => {
+        const order = await createOrder({ shopId: `shop-${new mongoose.Types.ObjectId()}` });
+        await createMediaFromFile(order, "outbound", await makeVideo("normal"), uploader);
+        await createMediaFromFile(order, "return", await makeVideo("normal"), uploader, { scanned: false });
+        const v = await validateEvidence({ order: (await Order.findById(order._id))!, stage: "initial" });
+        expect(v.escalationReasons).toContainEqual(
+            expect.objectContaining({ code: "EVIDENCE_NOT_SCANNED", blocking: true, evidenceType: "return" }),
+        );
+        expect(v.checks.find((c) => c.name === "label_scan" && c.evidenceType === "outbound")?.status).toBe("pass");
+    });
+
     it("escalates low model confidence and unverifiable key attributes", async () => {
         const order = await orderWithVideos("normal");
         const { outbound, returned } = await demoPair("blurry");

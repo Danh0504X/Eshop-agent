@@ -65,6 +65,8 @@ const EnvSchema = z
 
         UPLOAD_DIR: z.string().default("./uploads"),
         MAX_UPLOAD_SIZE_MB: z.coerce.number().positive().default(200),
+        // Demo convenience: allow attaching an existing video file instead of recording it in the app after the scan.
+        ALLOW_FILE_EVIDENCE: bool(false),
         MAX_VIDEO_DURATION_SEC: z.coerce.number().positive().default(600),
         MIN_VIDEO_DURATION_SEC: z.coerce.number().nonnegative().default(2),
         FRAMES_PER_VIDEO: z.coerce.number().int().min(2).max(30).default(8),

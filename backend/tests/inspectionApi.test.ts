@@ -129,10 +129,16 @@ describe("POST /api/inspections/:id/retry", () => {
         expect(escalated.status).toBe("needs_review");
         expect(escalated.reviewTask.status).toBe("open");
 
+        const scan = await request(app)
+            .post("/api/scans")
+            .set(auth(employee))
+            .send({ code: order.trackingCode, purpose: "return", method: "hand_scanner" });
         const upload = await request(app)
             .post(`/api/orders/${order.orderId}/media`)
             .set(auth(employee))
             .field("type", "return")
+            .field("scanId", scan.body.data.scan.id)
+            .field("captureMethod", "file")
             .attach("file", await makeVideo("normal"), { filename: "return.mp4", contentType: "video/mp4" });
         expect(upload.status).toBe(201);
 

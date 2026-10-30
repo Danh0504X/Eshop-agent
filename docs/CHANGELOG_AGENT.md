@@ -221,3 +221,24 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Tests executed:** typecheck OK; `npm test` 166 passed, 2 skipped (10 new in `scanFlow.test.ts`: order ID format; packing scan; rejected codes, purposes, methods and anonymous calls; existing code with and without visibility; return-scan lookup and scope; scanned tracking code and generated ID despite client-supplied identifiers; manual entry; concurrent use of one scan; wrong purpose, expired, someone else's and unknown scans; code taken after the scan and scan released after a failed creation). `foundation` order tests now create orders from scans. Build OK.
 - **Real API test:** not applicable (no AI calls).
 - **Suggested Git commit:** `feat(orders): create orders from label scans with generated order IDs`
+
+---
+
+## Scan-first redesign B4 — Every evidence video is bound to a label scan
+
+- **Files changed:** `backend/src/models/MediaEvidence.ts`, `backend/src/models/ScanSession.ts`, `backend/src/validators/schemas.ts`, `backend/src/services/mediaService.ts`, `backend/src/services/scanService.ts`, `backend/src/services/evidenceValidationService.ts`, `backend/src/services/reviewService.ts`, `backend/src/services/ffmpegService.ts`, `backend/src/controllers/scan.controller.ts`, `backend/src/routes/api.ts`, `backend/src/docs/openapi.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/scripts/seed.ts`, tests (`setup/env`, `helpers`, `evidenceValidation`, `fixitAgent`, `foundation`, `inspectionApi`, `scanFlow`)
+- **Files added:** `backend/tests/evidenceCapture.test.ts`
+- **Previous behavior:** any authorised user could upload a video file for an order; nothing recorded when or how it was captured, and the AI used to read the label to tie it to the order (removed in B2).
+- **New behavior:**
+  - `POST /api/orders/:orderId/media` requires `scanId` and `captureMethod` (`recorded` | `file`), optionally `recordingStartedAt` / `recordingEndedAt`. The scan must be the uploader's own, unexpired, of this order's tracking code, of the matching kind (packing scan for outbound, return scan for return), and unused for a video; it is claimed atomically and released again if the upload fails.
+  - `captureMethod=file` (attach an existing file) is accepted only when the new `ALLOW_FILE_EVIDENCE` is true (default false; `.env.example` sets true for local demos). A check that a `captureMethod=recorded` video is not longer than the time since its scan (plus 5 s) is implemented but **temporarily commented out** in `uploadEvidence`, so videos recorded earlier can still be uploaded while the workflow is tried out; the comment explains how to re-enable it.
+  - Videos store `capture {scanId, scanMethod, manualEntry, scannedAt, scannedBy, captureMethod, recordingStartedAt?, recordingEndedAt?}`.
+  - Evidence validation adds the blocking `EVIDENCE_NOT_SCANNED` for a linked video without a capture record, so such an inspection is escalated before any AI call; the review task asks to scan the label and upload the video again.
+  - A packing scan of a tracking code that already has an order now returns that order instead of 409, so its packing video can be added (for example after a failed upload) or replaced. It still cannot create a second order.
+  - `probeVideo` falls back to packet timestamps when the container has no duration, as in WebM files written live by a browser `MediaRecorder`. Without this, in-app recordings would fail both the duration check and frame extraction.
+  - `GET /api/health` reports `allowFileEvidence`.
+  - Seed videos are bound to hand-scanner scans and attached as files; `--reset` also removes scan sessions.
+- **Compatibility impact:** videos uploaded before this change have no `capture` and now block inspections with `EVIDENCE_NOT_SCANNED`; run `npm run seed -- --reset` for clean demo data. With `ALLOW_FILE_EVIDENCE` unset, file uploads are refused (set it to true for the old `frontend/` and local demos). The old `frontend/` upload form gets 400 until its minimal update.
+- **Tests executed:** typecheck OK; `npm test` 175 passed, 3 skipped (9 new: 7 active in `evidenceCapture.test.ts` covering capture recording, required fields, wrong kind / other label / other user / reused scan, manual entry, file uploads disabled without using up the scan, a long recorded video accepted while the timing check is disabled, and a live WebM without a duration header that uploads and extracts 8 frames; plus `EVIDENCE_NOT_SCANNED` in evidence validation and in the agent, which makes no AI call). The timing-check test is kept as `it.skip` for when the check is re-enabled. Existing upload tests now scan first; test helpers bind fixture videos to a scan unless `scanned: false`. Build OK.
+- **Real API test:** not applicable (no AI calls).
+- **Suggested Git commit:** `feat(evidence): require a label scan for every evidence upload`

@@ -101,22 +101,28 @@ export const probeVideo = async (filePath: string): Promise<VideoProbe> => {
     }
     const video = data.streams?.find((s) => s.codec_type === "video");
     if (!video) throw new ApiError("PROCESSING_ERROR", "File contains no video stream");
-    const durationSec = Number(data.format?.duration ?? video.duration);
+    const [num, den] = (video.avg_frame_rate ?? "0/1").split("/").map(Number);
+    const fps = den ? num / den : 0;
+    let durationSec = Number(data.format?.duration ?? video.duration);
+    if (!Number.isFinite(durationSec) || durationSec <= 0) {
+        // Live-written WebM (a browser MediaRecorder recording) has no duration header: use the packet timestamps.
+        const times = await videoPacketTimes(filePath);
+        if (times.length) durationSec = times[times.length - 1] - times[0] + (fps > 0 ? 1 / fps : 0);
+    }
     if (!Number.isFinite(durationSec) || durationSec <= 0) {
         throw new ApiError("PROCESSING_ERROR", "Could not determine video duration");
     }
-    const [num, den] = (video.avg_frame_rate ?? "0/1").split("/").map(Number);
     return {
         durationSec,
         width: video.width ?? 0,
         height: video.height ?? 0,
         codec: video.codec_name ?? "unknown",
-        fps: den ? num / den : 0,
+        fps,
     };
 };
 
-/** Largest gap between consecutive video packet timestamps: a cheap signal for cuts or dropped footage. */
-export const maxTimestampGap = async (filePath: string): Promise<number> => {
+/** Sorted presentation timestamps of every packet of the first video stream. */
+const videoPacketTimes = async (filePath: string): Promise<number[]> => {
     const { ffprobe } = await resolveBinaries();
     const { stdout } = await run(ffprobe, [
         "-v",
@@ -129,12 +135,17 @@ export const maxTimestampGap = async (filePath: string): Promise<number> => {
         "csv=p=0",
         filePath,
     ]);
-    const times = stdout
+    return stdout
         .toString("utf8")
         .split(/\r?\n/)
         .map((line) => Number(line.trim().replace(/,$/, "")))
         .filter((t) => Number.isFinite(t))
         .sort((a, b) => a - b);
+};
+
+/** Largest gap between consecutive video packet timestamps: a cheap signal for cuts or dropped footage. */
+export const maxTimestampGap = async (filePath: string): Promise<number> => {
+    const times = await videoPacketTimes(filePath);
     let gap = 0;
     for (let i = 1; i < times.length; i++) gap = Math.max(gap, times[i] - times[i - 1]);
     return gap;

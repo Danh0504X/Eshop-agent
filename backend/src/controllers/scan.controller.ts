@@ -11,7 +11,11 @@ export const create: RequestHandler = asyncHandler(async (request, response) => 
     const { scan, order } = await recordScan(principal, createScanSchema.parse(request.body));
     response.status(StatusCodes.CREATED).json({
         status: "success",
-        message: order ? `Order ${order.orderId} found` : "Label scanned; fill in the order details",
+        message: !order
+            ? "Label scanned; fill in the order details"
+            : scan.purpose === "packing"
+              ? `Order ${order.orderId} already exists for this label`
+              : `Order ${order.orderId} found`,
         data: { scan: serializeScan(scan), order: order ? serializeOrder(order, principal) : null },
     });
 });

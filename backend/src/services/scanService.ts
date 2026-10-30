@@ -4,7 +4,6 @@ import { ScanSession, type ScanPurpose, type ScanSessionDoc } from "../models/Sc
 import type { AuthPrincipal } from "../types/auth";
 import { ApiError, notFound } from "../utils/errors";
 import type { CreateOrderInput } from "../validators/schemas";
-import { canAccessWarehouse } from "./accessService";
 import { recordAudit } from "./auditService";
 import { createOrder, findOrder } from "./orderService";
 
@@ -15,29 +14,18 @@ export interface ScanInput {
 }
 
 /**
- * Record a label scan. A packing scan is for a tracking code that has no order yet; a return scan must find
- * the order within the caller's shop and warehouses. The scan then authorises the next step for that code
- * until it expires.
+ * Record a label scan. A return scan must find the order within the caller's shop and warehouses. A packing
+ * scan of a new code is for creating its order; a packing scan of a known code returns that order, so its
+ * packing video can be added or replaced (it can never create a second order). The scan then authorises the
+ * next step for that code until it expires.
  */
 export const recordScan = async (
     principal: AuthPrincipal,
     input: ScanInput,
 ): Promise<{ scan: ScanSessionDoc; order: OrderDoc | null }> => {
-    let order: OrderDoc | null = null;
-    if (input.purpose === "packing") {
-        const existing = await Order.findOne({ shopId: principal.shopId, trackingCode: input.code });
-        if (existing) {
-            // Name the order only to someone allowed to open it.
-            const visible = canAccessWarehouse(principal, existing.warehouseId);
-            throw new ApiError(
-                "CONFLICT",
-                `Tracking code ${input.code} already belongs to ${visible ? `order ${existing.orderId}` : "an order"}`,
-                visible ? [{ orderId: existing.orderId }] : [],
-            );
-        }
-    } else {
-        order = await findOrder(principal, { trackingCode: input.code });
-    }
+    const known =
+        input.purpose === "return" || (await Order.exists({ shopId: principal.shopId, trackingCode: input.code }));
+    const order = known ? await findOrder(principal, { trackingCode: input.code }) : null;
 
     const scan = await ScanSession.create({
         shopId: principal.shopId,
@@ -87,6 +75,11 @@ export const usableScan = async (
 export const createOrderFromScan = async (principal: AuthPrincipal, input: CreateOrderInput): Promise<OrderDoc> => {
     const { scanId, ...fields } = input;
     const scan = await usableScan(principal, scanId, "packing");
+    if (scan.orderId) {
+        throw new ApiError("CONFLICT", `Tracking code ${scan.code} already belongs to order ${scan.orderId}`, [
+            { orderId: scan.orderId },
+        ]);
+    }
     const claimed = await ScanSession.findOneAndUpdate(
         { _id: scan._id, orderCreatedAt: null },
         { $set: { orderCreatedAt: new Date() } },
@@ -114,6 +107,24 @@ export const createOrderFromScan = async (principal: AuthPrincipal, input: Creat
     }
     await ScanSession.updateOne({ _id: scan._id }, { $set: { orderRef: order._id, orderId: order.orderId } });
     return order;
+};
+
+/** Claim a scan for one evidence upload. Concurrent uploads with the same scan: exactly one wins. */
+export const claimScanForEvidence = async (scan: ScanSessionDoc): Promise<void> => {
+    const claimed = await ScanSession.findOneAndUpdate(
+        { _id: scan._id, mediaLinkedAt: null },
+        { $set: { mediaLinkedAt: new Date() } },
+    );
+    if (!claimed) throw new ApiError("INVALID_STATE", "This scan was already used for a video; scan the label again");
+};
+
+/** Undo a claim when the upload fails after it, so the same scan can be used to try again. */
+export const releaseScanForEvidence = async (scan: ScanSessionDoc): Promise<void> => {
+    await ScanSession.updateOne({ _id: scan._id }, { $unset: { mediaLinkedAt: 1 } });
+};
+
+export const bindScanToEvidence = async (scan: ScanSessionDoc, mediaId: unknown): Promise<void> => {
+    await ScanSession.updateOne({ _id: scan._id }, { $set: { mediaRef: mediaId } });
 };
 
 export const serializeScan = (scan: ScanSessionDoc) => ({

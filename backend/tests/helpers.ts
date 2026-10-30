@@ -87,7 +87,7 @@ export const useAdvisoryDemoProvider = (): void => {
 
 const FIXTURE_DIR = path.resolve("tests/.fixtures");
 
-export type VideoKind = "normal" | "dark" | "blurry" | "short";
+export type VideoKind = "normal" | "dark" | "blurry" | "short" | "long";
 
 /** Generate (and cache) a small synthetic test video with FFmpeg. */
 export const makeVideo = async (kind: VideoKind = "normal"): Promise<string> => {
@@ -97,10 +97,11 @@ export const makeVideo = async (kind: VideoKind = "normal"): Promise<string> => 
     const filters: Record<VideoKind, string | null> = {
         normal: null,
         short: null,
+        long: null,
         dark: "lutyuv=y=val*0.08",
         blurry: "boxblur=12:6",
     };
-    const duration = kind === "short" ? "1" : "4";
+    const duration = kind === "short" ? "1" : kind === "long" ? "12" : "4";
     const args = ["-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10", "-t", duration];
     if (filters[kind]) args.push("-vf", filters[kind]!);
     args.push("-pix_fmt", "yuv420p", "-c:v", "libx264", out);
@@ -108,19 +109,73 @@ export const makeVideo = async (kind: VideoKind = "normal"): Promise<string> => 
     return out;
 };
 
-/** Copy a fixture video into storage and register it as linked evidence on the order. */
+/** A WebM written in live mode, like a browser MediaRecorder recording: its header carries no duration. */
+export const makeLiveWebm = async (): Promise<string> => {
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+    const out = path.join(FIXTURE_DIR, "live.webm");
+    if (fs.existsSync(out)) return out;
+    await run(ffmpegStatic as unknown as string, [
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=320x240:rate=10",
+        "-t",
+        "4",
+        "-c:v",
+        "libvpx",
+        "-deadline",
+        "realtime",
+        "-live",
+        "1",
+        out,
+    ]);
+    return out;
+};
+
+/**
+ * Copy a fixture video into storage and register it as linked evidence on the order. Unless `scanned` is
+ * false, it is bound to a label scan as if it had been uploaded through the scan workflow.
+ */
 export const createMediaFromFile = async (
-    order: { _id: mongoose.Types.ObjectId; orderId: string; shopId: string; warehouseId: string },
+    order: { _id: mongoose.Types.ObjectId; orderId: string; trackingCode: string; shopId: string; warehouseId: string },
     type: "outbound" | "return",
     filePath: string,
     uploadedBy: string,
+    options: { scanned?: boolean } = {},
 ) => {
     const { MediaEvidence } = await import("../src/models/MediaEvidence");
     const { Order: OrderModel } = await import("../src/models/Order");
+    const { ScanSession } = await import("../src/models/ScanSession");
     const { storage } = await import("../src/services/storageService");
     const key = `media/${order.shopId}/${order.orderId}/${type}-${crypto.randomUUID()}.mp4`;
     await storage().writeBuffer(key, fs.readFileSync(filePath));
+    const scan =
+        options.scanned === false
+            ? null
+            : await ScanSession.create({
+                  shopId: order.shopId,
+                  scannedBy: uploadedBy,
+                  code: order.trackingCode,
+                  purpose: type === "outbound" ? "packing" : "return",
+                  method: "camera",
+                  orderRef: order._id,
+                  orderId: order.orderId,
+                  expiresAt: new Date(Date.now() + 30 * 60_000),
+                  mediaLinkedAt: new Date(),
+              });
     const media = await MediaEvidence.create({
+        ...(scan
+            ? {
+                  capture: {
+                      scanId: scan._id,
+                      scanMethod: scan.method,
+                      scannedAt: scan.createdAt,
+                      scannedBy: uploadedBy,
+                      captureMethod: "file",
+                  },
+              }
+            : {}),
         orderId: order.orderId,
         orderRef: order._id,
         shopId: order.shopId,

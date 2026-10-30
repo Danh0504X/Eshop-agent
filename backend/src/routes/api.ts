@@ -24,6 +24,8 @@ router.get("/health", (_request, response) => {
         aiModel: models?.vision ?? null,
         plannerModel: models && env.AGENT_PLANNER === "llm" ? models.planner : null,
         planner: env.aiMode === "real" ? env.AGENT_PLANNER : "deterministic",
+        // Whether evidence may be attached as a file (demo) or must be recorded in the app after the scan.
+        allowFileEvidence: env.ALLOW_FILE_EVIDENCE,
     });
 });
 

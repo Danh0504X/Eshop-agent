@@ -67,16 +67,21 @@ describe("POST /api/scans", () => {
         expect(anonymous.status).toBe(401);
     });
 
-    it("refuses a packing scan for a code that already has an order, naming it only to those who may open it", async () => {
+    it("returns the existing order on a packing scan of a known code, which cannot create a second order", async () => {
         await createOrder({ orderId: "ORD-TAKEN", trackingCode: "GHN-TAKEN", warehouseId: "wh-1" });
         await createOrder({ orderId: "ORD-TAKEN-2", trackingCode: "GHN-TAKEN-2", warehouseId: "wh-2" });
-        const visible = await scan(employee, "GHN-TAKEN");
-        expect(visible.status).toBe(409);
-        expect(visible.body.errors).toEqual([{ orderId: "ORD-TAKEN" }]);
-        const hidden = await scan(employee, "GHN-TAKEN-2");
-        expect(hidden.status).toBe(409);
-        expect(hidden.body.message).not.toMatch(/ORD-TAKEN-2/);
-        expect(hidden.body.errors).toEqual([]);
+        const known = await scan(employee, "GHN-TAKEN");
+        expect(known.status).toBe(201);
+        expect(known.body.message).toMatch(/already exists/);
+        expect(known.body.data.order.orderId).toBe("ORD-TAKEN");
+        expect(known.body.data.scan).toMatchObject({ purpose: "packing", orderId: "ORD-TAKEN" });
+
+        const second = await createFromScan(employee, known.body.data.scan.id);
+        expect(second.status).toBe(409);
+        expect(second.body.errors).toEqual([{ orderId: "ORD-TAKEN" }]);
+        expect(await Order.countDocuments({ trackingCode: "GHN-TAKEN" })).toBe(1);
+
+        expect((await scan(employee, "GHN-TAKEN-2")).status).toBe(403);
     });
 
     it("finds the order on a return scan, within the caller's shop and warehouses", async () => {

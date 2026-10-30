@@ -19,12 +19,15 @@ const ScanSessionSchema = new Schema(
         code: { type: String, required: true, trim: true },
         purpose: { type: String, enum: SCAN_PURPOSES, required: true },
         method: { type: String, enum: SCAN_METHODS, required: true },
-        /** Return scans: the order found for the code. Packing scans: the order created from it. */
+        /** The order the code belongs to: found at scan time, or (packing) created from this scan. */
         orderRef: { type: Schema.Types.ObjectId, ref: "Order" },
         orderId: { type: String },
         expiresAt: { type: Date, required: true },
         /** Packing scans only: set once, when an order is created from this scan. */
         orderCreatedAt: { type: Date },
+        /** Set once, when an evidence video is uploaded with this scan. */
+        mediaLinkedAt: { type: Date },
+        mediaRef: { type: Schema.Types.ObjectId, ref: "MediaEvidence" },
     },
     { timestamps: true },
 );

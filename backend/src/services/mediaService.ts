@@ -2,12 +2,15 @@ import crypto from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import type { Types } from "mongoose";
-import { MediaEvidence, type MediaDoc, type MediaType } from "../models/MediaEvidence";
+import { env } from "../config/env";
+import { MediaEvidence, type CaptureMethod, type MediaDoc, type MediaType } from "../models/MediaEvidence";
 import { Order, type OrderDoc } from "../models/Order";
 import type { AuthPrincipal } from "../types/auth";
 import { ApiError, notFound } from "../utils/errors";
 import { assertRole, assertScope } from "./accessService";
 import { recordAudit } from "./auditService";
+// import { probeVideo } from "./ffmpegService"; // used by the recording-time check below (disabled for now)
+import { bindScanToEvidence, claimScanForEvidence, releaseScanForEvidence, usableScan } from "./scanService";
 import { safeSegment, storage } from "./storageService";
 
 export const ALLOWED_VIDEO_TYPES: Record<string, string[]> = {
@@ -41,15 +44,30 @@ export interface UploadedFile {
     size: number;
 }
 
+export interface UploadOptions {
+    type: MediaType;
+    /** A scan of this order's label by the uploader: packing scan for outbound, return scan for return videos. */
+    scanId: string;
+    captureMethod: CaptureMethod;
+    recordingStartedAt?: Date;
+    recordingEndedAt?: Date;
+    replaceExisting: boolean;
+    replacementReason?: string;
+}
+
+// Disabled together with the recording-time check in uploadEvidence:
+// /** Clock and encoding slack allowed when a recorded video is compared with the time since its scan. */
+// const RECORDING_SLACK_SEC = 5;
+
 /**
- * Store an uploaded evidence video and link it to the order.
- * The temp file is always removed, whether the upload succeeds or not.
+ * Store an uploaded evidence video and link it to the order. The video must come with an unused scan of the
+ * order's label. The temp file is always removed, whether the upload succeeds or not.
  */
 export const uploadEvidence = async (
     principal: AuthPrincipal,
     order: OrderDoc,
     file: UploadedFile,
-    options: { type: MediaType; replaceExisting: boolean; replacementReason?: string },
+    options: UploadOptions,
 ): Promise<MediaDoc> => {
     try {
         const extension = path.extname(file.originalname).toLowerCase();
@@ -79,45 +97,99 @@ export const uploadEvidence = async (
             );
         }
 
-        const sha256 = crypto
-            .createHash("sha256")
-            .update(await fsp.readFile(file.path))
-            .digest("hex");
-        const key = `media/${safeSegment(order.shopId)}/${safeSegment(order.orderId)}/${options.type}-${crypto.randomUUID()}${extension}`;
-        await storage().importFile(file.path, key);
+        const scan = await usableScan(principal, options.scanId, options.type === "outbound" ? "packing" : "return");
+        if (scan.code !== order.trackingCode) {
+            throw new ApiError(
+                "VALIDATION_ERROR",
+                `The scanned label (${scan.code}) is not the tracking code of order ${order.orderId}`,
+            );
+        }
+        if (options.captureMethod === "file" && !env.ALLOW_FILE_EVIDENCE) {
+            throw new ApiError(
+                "FORBIDDEN",
+                "Attaching video files is disabled; record the video in the app after scanning the label",
+            );
+        }
+        // TEMPORARILY DISABLED: a video recorded after the scan cannot be longer than the time since that scan.
+        // Turned off so videos recorded earlier can still be uploaded while the workflow is being tried out.
+        // To re-enable: uncomment this block, the probeVideo import and RECORDING_SLACK_SEC above; in
+        // tests/evidenceCapture.test.ts un-skip "refuses a recorded video longer than the time since its scan" and
+        // delete "... while the recording-time check is disabled".
+        // if (options.captureMethod === "recorded") {
+        //     const { durationSec } = await probeVideo(file.path);
+        //     const sinceScanSec = (Date.now() - scan.createdAt.getTime()) / 1000;
+        //     if (durationSec > sinceScanSec + RECORDING_SLACK_SEC) {
+        //         throw new ApiError(
+        //             "VALIDATION_ERROR",
+        //             `The video is ${durationSec.toFixed(1)} s long but the label was scanned ${sinceScanSec.toFixed(0)} s ago; record the video after scanning the label`,
+        //         );
+        //     }
+        // }
 
-        const media = await MediaEvidence.create({
-            orderId: order.orderId,
-            orderRef: order._id,
-            shopId: order.shopId,
-            warehouseId: order.warehouseId,
-            type: options.type,
-            storageKey: key,
-            originalName: path.basename(file.originalname).slice(0, 200),
-            mimeType: file.mimetype,
-            sizeBytes: file.size,
-            sha256,
-            uploadedBy: principal.userId,
-        });
-        await recordAudit({
-            action: "media.upload",
-            actorType: "user",
-            actorId: principal.userId,
-            shopId: order.shopId,
-            orderId: order.orderId,
-            mediaId: media.id,
-            details: { type: options.type, sizeBytes: file.size, sha256 },
-        });
+        await claimScanForEvidence(scan);
+        try {
+            const sha256 = crypto
+                .createHash("sha256")
+                .update(await fsp.readFile(file.path))
+                .digest("hex");
+            const key = `media/${safeSegment(order.shopId)}/${safeSegment(order.orderId)}/${options.type}-${crypto.randomUUID()}${extension}`;
+            await storage().importFile(file.path, key);
 
-        return await linkMedia(
-            principal,
-            { orderId: order.orderId, mediaId: media.id, type: options.type },
-            {
+            const media = await MediaEvidence.create({
+                orderId: order.orderId,
+                orderRef: order._id,
+                shopId: order.shopId,
+                warehouseId: order.warehouseId,
+                type: options.type,
+                storageKey: key,
+                originalName: path.basename(file.originalname).slice(0, 200),
+                mimeType: file.mimetype,
+                sizeBytes: file.size,
+                sha256,
+                uploadedBy: principal.userId,
+                capture: {
+                    scanId: scan._id,
+                    scanMethod: scan.method,
+                    manualEntry: scan.method === "manual",
+                    scannedAt: scan.createdAt,
+                    scannedBy: scan.scannedBy,
+                    captureMethod: options.captureMethod,
+                    recordingStartedAt: options.recordingStartedAt,
+                    recordingEndedAt: options.recordingEndedAt,
+                },
+            });
+            await recordAudit({
+                action: "media.upload",
                 actorType: "user",
-                replaceExisting: options.replaceExisting,
-                replacementReason: options.replacementReason,
-            },
-        );
+                actorId: principal.userId,
+                shopId: order.shopId,
+                orderId: order.orderId,
+                mediaId: media.id,
+                details: {
+                    type: options.type,
+                    sizeBytes: file.size,
+                    sha256,
+                    captureMethod: options.captureMethod,
+                    scanMethod: scan.method,
+                },
+            });
+
+            const linked = await linkMedia(
+                principal,
+                { orderId: order.orderId, mediaId: media.id, type: options.type },
+                {
+                    actorType: "user",
+                    replaceExisting: options.replaceExisting,
+                    replacementReason: options.replacementReason,
+                },
+            );
+            await bindScanToEvidence(scan, linked._id);
+            return linked;
+        } catch (error) {
+            // The scan is released so the person can retry with it.
+            await releaseScanForEvidence(scan);
+            throw error;
+        }
     } finally {
         await fsp.rm(file.path, { force: true });
     }

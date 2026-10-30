@@ -22,6 +22,9 @@ beforeAll(async () => {
 afterAll(disconnectTestDb);
 
 const auth = (user: TestUser) => ({ Authorization: `Bearer ${user.token}` });
+const scanFor = async (user: TestUser, code: string, purpose: "packing" | "return" = "packing") =>
+    (await request(app).post("/api/scans").set(auth(user)).send({ code, purpose, method: "camera" })).body.data.scan
+        .id as string;
 
 describe("health and auth", () => {
     it("reports database and analysis mode", async () => {
@@ -53,13 +56,10 @@ describe("orders", () => {
         product: { name: "Smart Watch", color: "silver" },
         expectedQuantity: 1,
     };
-    const packingScan = async (user: TestUser, code: string) =>
-        (await request(app).post("/api/scans").set(auth(user)).send({ code, purpose: "packing", method: "camera" }))
-            .body.data.scan.id as string;
     let createdOrderId: string;
 
     it("creates an order from a packing scan and validates input", async () => {
-        const scanId = await packingScan(owner, "TRK-API-1");
+        const scanId = await scanFor(owner, "TRK-API-1");
         const res = await request(app)
             .post("/api/orders")
             .set(auth(owner))
@@ -83,7 +83,7 @@ describe("orders", () => {
     });
 
     it("stops employees from creating orders outside their warehouses", async () => {
-        const scanId = await packingScan(employee, "TRK-API-2");
+        const scanId = await scanFor(employee, "TRK-API-2");
         const res = await request(app)
             .post("/api/orders")
             .set(auth(employee))
@@ -108,12 +108,14 @@ describe("orders", () => {
 
 describe("evidence upload", () => {
     it("uploads, links, and refuses silent overwrites", async () => {
-        await createOrder({ orderId: "ORD-MEDIA" });
+        const { trackingCode } = await createOrder({ orderId: "ORD-MEDIA" });
 
         const first = await request(app)
             .post("/api/orders/ORD-MEDIA/media")
             .set(auth(employee))
             .field("type", "outbound")
+            .field("scanId", await scanFor(employee, trackingCode))
+            .field("captureMethod", "file")
             .attach("file", videoPath, { filename: "packing.mp4", contentType: "video/mp4" });
         expect(first.status).toBe(201);
         expect(first.body.data.media.status).toBe("linked");
@@ -123,6 +125,8 @@ describe("evidence upload", () => {
             .post("/api/orders/ORD-MEDIA/media")
             .set(auth(employee))
             .field("type", "outbound")
+            .field("scanId", await scanFor(employee, trackingCode))
+            .field("captureMethod", "file")
             .attach("file", videoPath, { filename: "packing2.mp4", contentType: "video/mp4" });
         expect(again.status).toBe(409);
 
@@ -132,6 +136,8 @@ describe("evidence upload", () => {
             .field("type", "outbound")
             .field("replaceExisting", "true")
             .field("replacementReason", "Original recording was cut off")
+            .field("scanId", await scanFor(employee, trackingCode))
+            .field("captureMethod", "file")
             .attach("file", videoPath, { filename: "packing3.mp4", contentType: "video/mp4" });
         expect(replaced.status).toBe(201);
 
@@ -143,11 +149,13 @@ describe("evidence upload", () => {
     });
 
     it("rejects files whose content is not a video", async () => {
-        await createOrder({ orderId: "ORD-FAKE" });
+        const { trackingCode } = await createOrder({ orderId: "ORD-FAKE" });
         const res = await request(app)
             .post("/api/orders/ORD-FAKE/media")
             .set(auth(owner))
             .field("type", "return")
+            .field("scanId", await scanFor(owner, trackingCode, "return"))
+            .field("captureMethod", "file")
             .attach("file", Buffer.from("definitely not a video file"), {
                 filename: "x.mp4",
                 contentType: "video/mp4",

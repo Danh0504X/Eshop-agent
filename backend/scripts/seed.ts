@@ -20,6 +20,7 @@ import { Claim } from "../src/models/Claim";
 import { Inspection } from "../src/models/Inspection";
 import { MediaEvidence } from "../src/models/MediaEvidence";
 import { Order } from "../src/models/Order";
+import { ScanSession } from "../src/models/ScanSession";
 import { User } from "../src/models/User";
 import { hashPassword } from "../src/services/authService";
 import { resolveBinaries } from "../src/services/ffmpegService";
@@ -211,6 +212,7 @@ const reset = async () => {
         Inspection.deleteMany({ shopId: { $in: shops } }),
         Order.deleteMany({ shopId: { $in: shops } }),
         AuditLog.deleteMany({ shopId: { $in: shops } }),
+        ScanSession.deleteMany({ shopId: { $in: shops } }),
         User.deleteMany({ shopId: { $in: shops } }),
     ]);
     console.info("Removed existing demo data.");
@@ -238,6 +240,18 @@ const attachVideo = async (
     const data = fs.readFileSync(file);
     const key = `media/${order.shopId}/${order.orderId}/${type}-${crypto.randomUUID()}.mp4`;
     await storage().writeBuffer(key, data);
+    // Every video is bound to a scan of the order's label; demo videos are attached as files.
+    const scan = await ScanSession.create({
+        shopId: order.shopId,
+        scannedBy: uploadedBy,
+        code: order.trackingCode,
+        purpose: type === "outbound" ? "packing" : "return",
+        method: "hand_scanner",
+        orderRef: order._id,
+        orderId: order.orderId,
+        expiresAt: new Date(),
+        mediaLinkedAt: new Date(),
+    });
     const media = await MediaEvidence.create({
         orderId: order.orderId,
         orderRef: order._id,
@@ -251,7 +265,15 @@ const attachVideo = async (
         sha256: crypto.createHash("sha256").update(data).digest("hex"),
         uploadedBy,
         status: "linked",
+        capture: {
+            scanId: scan._id,
+            scanMethod: scan.method,
+            scannedAt: scan.createdAt,
+            scannedBy: uploadedBy,
+            captureMethod: "file",
+        },
     });
+    await ScanSession.updateOne({ _id: scan._id }, { $set: { mediaRef: media._id } });
     order.set(type === "outbound" ? "packingMedia" : "returnMedia", [media._id]);
 };
 

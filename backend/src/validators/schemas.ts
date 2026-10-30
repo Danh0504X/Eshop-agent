@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CLAIM_STATUSES, FINAL_DETERMINATIONS } from "../models/Claim";
-import { MEDIA_TYPES } from "../models/MediaEvidence";
+import { CAPTURE_METHODS, MEDIA_TYPES } from "../models/MediaEvidence";
 import { SCAN_METHODS, SCAN_PURPOSES } from "../models/ScanSession";
 
 const identifier = z
@@ -66,16 +66,24 @@ const boolField = z
     .optional()
     .transform((v) => v === true || v === "true");
 
-/** Multipart fields that accompany an evidence upload. */
+/** Multipart fields that accompany an evidence upload. Every video is bound to a scan of the order's label. */
 export const uploadMediaFields = z
     .object({
         type: z.enum(MEDIA_TYPES),
+        scanId: objectIdParam,
+        captureMethod: z.enum(CAPTURE_METHODS),
+        recordingStartedAt: z.coerce.date().optional(),
+        recordingEndedAt: z.coerce.date().optional(),
         replaceExisting: boolField,
         replacementReason: z.string().trim().max(500).optional(),
     })
     .refine((v) => !v.replaceExisting || (v.replacementReason && v.replacementReason.length >= 5), {
         message: "replacementReason (at least 5 characters) is required when replacing existing evidence",
         path: ["replacementReason"],
+    })
+    .refine((v) => !v.recordingStartedAt || !v.recordingEndedAt || v.recordingEndedAt >= v.recordingStartedAt, {
+        message: "recordingEndedAt must not be before recordingStartedAt",
+        path: ["recordingEndedAt"],
     });
 
 export const deleteMediaSchema = z.object({
