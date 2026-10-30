@@ -310,7 +310,7 @@ export const deleteMedia = async (principal: AuthPrincipal, mediaId: string, rea
 };
 
 export const serializeMedia = (media: MediaDoc) => {
-    const { storageKey: _storageKey, ...rest } = media.toObject({ versionKey: false });
+    const { storageKey: _storageKey, analysisCache: _analysisCache, ...rest } = media.toObject({ versionKey: false });
     return {
         ...rest,
         frames: (rest.frames ?? []).map(({ storageKey: _key, ...frame }) => frame),

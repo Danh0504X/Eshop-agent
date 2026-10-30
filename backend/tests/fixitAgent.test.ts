@@ -228,7 +228,7 @@ describe("FixIt agent with the deterministic planner (demo analysis)", () => {
         });
         const { result } = await inspect();
         expect(result.status).toBe("needs_review");
-        expect(calls).toBe(2);
+        expect(calls).toBe(3); // outbound twice, plus the return video started at the same time
         expect(result.reviewTask?.reasons?.join(" ")).toMatch(/analyze_item failed/);
     });
 });

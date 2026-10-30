@@ -101,6 +101,8 @@ const MediaEvidenceSchema = new Schema(
         deletedAt: { type: Date },
         /** The label scan that bound this video to its order, and how the video was captured. */
         capture: { type: CaptureSchema },
+        /** The last good AI analysis of this video and what it depended on; see visionService. */
+        analysisCache: { key: String, record: Schema.Types.Mixed },
     },
     { timestamps: true },
 );

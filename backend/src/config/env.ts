@@ -37,6 +37,8 @@ const EnvSchema = z
             z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
         ),
         // Transport-level backoff for 429/503 only (full jitter, honours Google's RetryInfo).
+        // Reuse a good analysis of an unchanged video when an inspection runs again (see visionService).
+        AI_ANALYSIS_CACHE: bool(true),
         AI_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(6).default(3),
         AI_RETRY_BASE_DELAY_MS: z.coerce.number().int().min(0).default(2_000),
         AI_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(0).default(30_000),

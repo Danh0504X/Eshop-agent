@@ -54,6 +54,8 @@ export interface AgentContext {
     media: Partial<Record<MediaType, MediaDoc>>;
     extraction: Partial<Record<MediaType, ExtractionResult>>;
     analyses: Partial<Record<MediaType, AnalysisRecord>>;
+    /** Analyses started ahead of their analyze_item call, so both videos are analysed at the same time. */
+    pendingAnalyses: Partial<Record<MediaType, Promise<AnalysisRecord>>>;
     comparison?: ComparisonResult;
     initialValidation?: EvidenceValidation;
     finalValidation?: EvidenceValidation;
@@ -81,6 +83,7 @@ export const createContext = (inspection: InspectionDoc, principal: AuthPrincipa
     media: {},
     extraction: {},
     analyses: {},
+    pendingAnalyses: {},
     pendingEscalation: [],
     reviewTaskCreated: false,
     attempts: {},

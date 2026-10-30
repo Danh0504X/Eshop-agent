@@ -101,6 +101,8 @@ export interface AnalysisRecord {
     validationNotes: string[];
     /** Provider-reported token usage, for cost tracking. */
     usage?: { promptTokens: number; outputTokens: number; thoughtsTokens: number; apiAttempts: number };
+    /** True when this result came from an earlier run on the same evidence, without a new AI request. */
+    reused?: boolean;
 }
 
 type Condition = VisionAnalysis["items"][number]["condition"];

@@ -96,8 +96,9 @@ export const summarizeToolResult = (tool: string, data: Data): { headline: strin
         case "analyze_item": {
             const item = data.items?.[0];
             return {
-                headline: `${data.evidenceType} ${data.reanalysis ? `RE-ANALYSIS with ${data.segmentFramesIncluded?.length ?? 0} segment frame(s)` : "analysis"} (${data.source === "demo" ? "DEMO DATA" : "AI"}): contents=${data.packageContents}, confidence ${Number(data.overallConfidence ?? 0).toFixed(2)}`,
+                headline: `${data.evidenceType} ${data.reanalysis ? `RE-ANALYSIS with ${data.segmentFramesIncluded?.length ?? 0} segment frame(s)` : "analysis"} (${data.source === "demo" ? "DEMO DATA" : data.reused ? "AI, REUSED from an earlier run, no AI call" : "AI"}): contents=${data.packageContents}, confidence ${Number(data.overallConfidence ?? 0).toFixed(2)}`,
                 details: [
+                    `frames sent: ${(data.framesAnalyzed ?? []).length} of ${data.framesExtracted ?? "?"} extracted (dark or blurry frames are left out)`,
                     `product ${obs(item?.productType)} | qty ${obs(data.totalItemCount)} | colour ${obs(item?.color)} | model ${obs(item?.model)}`,
                     `product condition: ${describeCondition(item?.condition)}`,
                     `accessories: ${(data.accessories ?? []).map((a: Data) => `${a.name}=${a.status}`).join(", ") || "none listed"} | packaging: ${data.packagingCondition?.overall ?? "?"}`,

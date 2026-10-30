@@ -1,3 +1,6 @@
+import crypto from "node:crypto";
+import { z } from "zod";
+import { buildVisionUserText, VISION_SYSTEM_PROMPT } from "../agent/prompts";
 import {
     normalizeAnalysis,
     normalizeSegmentObservation,
@@ -6,10 +9,11 @@ import {
     type AnalysisRecord,
     type SegmentInspectionRecord,
 } from "../agent/schemas";
-import { env } from "../config/env";
-import type { MediaDoc } from "../models/MediaEvidence";
+import { activeModels, env } from "../config/env";
+import { MediaEvidence, type MediaDoc } from "../models/MediaEvidence";
 import type { OrderDoc } from "../models/Order";
-import { ApiError } from "../utils/errors";
+import { ApiError, errorMessage } from "../utils/errors";
+import { logger } from "../utils/logger";
 import { aiError } from "./vision/errors";
 import { getVisionProvider } from "./vision";
 import type { VisionFrame } from "./vision/types";
@@ -18,11 +22,14 @@ import { isBaselineFrame } from "./videoProcessingService";
 
 type Frame = MediaDoc["frames"][number];
 
-/** Pick up to `max` frames spread across the video, preferring frames that passed the quality check. */
+/** With fewer clear frames than this the model gets all of them: dark or blurry frames beat too few frames. */
+const MIN_CLEAR_FRAMES = 3;
+
+/** Pick up to `max` frames spread across the video, leaving out frames that failed the quality check. */
 export const selectFrames = (frames: Frame[], max: number): Frame[] => {
-    if (frames.length <= max) return [...frames];
-    const good = frames.filter((f) => f.quality === "ok");
-    const pool = good.length >= max ? good : frames;
+    const clear = frames.filter((f) => f.quality === "ok");
+    const pool = clear.length >= MIN_CLEAR_FRAMES ? clear : frames;
+    if (pool.length <= max) return [...pool];
     const step = pool.length / max;
     const picked = Array.from({ length: max }, (_, i) => pool[Math.floor(i * step)]);
     return picked.sort((a, b) => a.index - b.index);
@@ -110,6 +117,59 @@ export const analyzeEvidence = async (
         validationNotes: notes,
         ...(response.usage ? { usage: response.usage } : {}),
     };
+};
+
+const ANALYSIS_CONTRACT = JSON.stringify([VISION_SYSTEM_PROMPT, z.toJSONSchema(VisionAnalysisSchema)]);
+
+/** Everything an analysis depends on, so changing the prompt, schema, model, frames or checklist runs it again. */
+const analysisKey = (media: MediaDoc, order: OrderDoc): string => {
+    const frames = selectFrames(media.frames.filter(isBaselineFrame), env.MAX_FRAMES_PER_ANALYSIS);
+    const product = order.product!;
+    return crypto
+        .createHash("sha256")
+        .update(
+            JSON.stringify({
+                contract: ANALYSIS_CONTRACT,
+                provider: getVisionProvider().source,
+                model: activeModels(env)?.vision,
+                thinking: [env.GEMINI_THINKING_LEVEL ?? null, env.AI_EFFORT],
+                checklist: buildVisionUserText({
+                    evidenceType: media.type,
+                    productName: product.name,
+                    productDescription: product.description || undefined,
+                    expectedQuantity: order.expectedQuantity,
+                    expectedAccessories: order.expectedAccessories,
+                    frameCount: frames.length,
+                }),
+                frames: frames.map((f) => [f.frameId, f.timestampSec, f.sharpness]),
+            }),
+        )
+        .digest("hex");
+};
+
+/** The stored analysis of this video, if it is still valid for this order and configuration. */
+export const findReusableAnalysis = (media: MediaDoc, order: OrderDoc): AnalysisRecord | null => {
+    const cache = media.analysisCache as { key?: string; record?: AnalysisRecord } | undefined;
+    if (!env.AI_ANALYSIS_CACHE || !cache?.record || cache.key !== analysisKey(media, order)) return null;
+    return { ...cache.record, reused: true };
+};
+
+/**
+ * Keep a good AI analysis for later runs. A weak one is not kept: running the inspection again is then a real
+ * second attempt. Failing to store it must not fail the analysis.
+ */
+export const rememberAnalysis = async (media: MediaDoc, order: OrderDoc, record: AnalysisRecord): Promise<void> => {
+    const { overallConfidence, imageConditions } = record.result;
+    const usable = imageConditions.lighting !== "unusable" && imageConditions.focus !== "unusable";
+    if (record.source !== "ai" || overallConfidence < env.CONFIDENCE_THRESHOLD || !usable) return;
+    try {
+        await MediaEvidence.updateOne(
+            { _id: media._id },
+            { $set: { analysisCache: { key: analysisKey(media, order), record } } },
+        );
+    } catch (error) {
+        logger.warn("Could not store the analysis for reuse", { mediaId: media.id, error: errorMessage(error) });
+    }
 };
 
 /** Ask the vision provider one targeted question about the frames of one extracted segment. */

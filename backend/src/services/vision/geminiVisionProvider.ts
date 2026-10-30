@@ -92,7 +92,7 @@ export class GeminiVisionProvider implements VisionProvider {
                     responseJsonSchema: ANALYSIS_SCHEMA,
                 },
             },
-            { label: LABEL, deadlineMs: request.deadlineMs },
+            { label: `${LABEL} (${request.evidenceType})`, deadlineMs: request.deadlineMs },
         );
         return {
             analysis: parseStructured(response, VisionAnalysisSchema),
@@ -127,7 +127,7 @@ export class GeminiVisionProvider implements VisionProvider {
                     responseJsonSchema: SEGMENT_SCHEMA,
                 },
             },
-            { label: LABEL, deadlineMs: request.deadlineMs },
+            { label: `${LABEL} (${request.evidenceType})`, deadlineMs: request.deadlineMs },
         );
         return {
             observation: parseStructured(response, SegmentObservationSchema),
