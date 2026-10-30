@@ -1,13 +1,5 @@
 import express from "express";
-import {
-    approve,
-    downloadReport,
-    getOne,
-    list,
-    markSubmitted,
-    reject,
-    resolve,
-} from "../controllers/claim.controller";
+import { approve, downloadReport, getOne, list, markSubmitted, reject, resolve } from "../controllers/claim.controller";
 import { authMiddleware } from "../middleware/authMiddleware";
 
 const router = express.Router();
