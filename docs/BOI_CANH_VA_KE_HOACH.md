@@ -87,6 +87,9 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 | `9a4cf15` | `web/`: khung app, đăng nhập, layout responsive, chip chế độ AI |
 | `0684774` | `web/`: quét mã (camera, ảnh), quay video bằng webcam, trang thử thiết bị `/dev/devices` |
 | `43cbc9c` | `web/`: màn hình Thêm đơn 3 bước |
+| `7354c3b` | `web/`: báo lỗi validation theo từng trường, kiểm tra mã kho ở bước 2 |
+| `ebac469` | docs: thêm tài liệu bối cảnh và kế hoạch này |
+| (commit tiếp theo) | `web/`: danh sách đơn, chi tiết đơn kèm video, màn hình Nhận hàng hoàn |
 
 **Phát hiện quan trọng trong quá trình làm:**
 - **Lỗ hổng của B3, đã sửa ở B4:** quét `packing` một mã đã có đơn từng trả lỗi 409, nên không còn cách nào bổ sung video đóng gói cho đơn đó.
@@ -122,8 +125,8 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 
 | Bước | Nội dung |
 |---|---|
-| 9 | Danh sách đơn + chi tiết đơn + thẻ kết quả kiểm tra (câu tiếng Việt, ảnh frame làm căn cứ) |
-| 10 | Nhận hàng hoàn: quét → quay video mở hàng → gửi và kiểm tra → tiến trình → kết quả |
+| 9 | **Đã có:** danh sách đơn, chi tiết đơn kèm video. **Còn:** thẻ kết quả kiểm tra (câu tiếng Việt, ảnh frame làm căn cứ) |
+| 10 | **Đã có:** Nhận hàng hoàn: quét → tìm đơn → quay/tải video hoàn trả. **Còn:** nút chạy kiểm tra AI → tiến trình → kết quả (hiện vẫn chạy ở `frontend/`) |
 | 11 | Khiếu nại: danh sách, chi tiết, PDF, duyệt / từ chối |
 | 12 | `web/README.md` + cập nhật tài liệu |
 

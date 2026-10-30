@@ -311,3 +311,19 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **New behavior:** step 2 checks the warehouse, product name and quantity before moving on to the video; the warehouse field explains the allowed characters; validation errors from the backend are shown per field in Vietnamese.
 - **Tests executed:** `npm run typecheck` and Prettier in `web/` OK. In headless Chrome against a throwaway database, as the owner: `Kho Hà Nội` is stopped at step 2; `kho1` creates the order and uploads the video; a simulated backend validation error shows the field messages. The exact value that caused the reported failure was not confirmed.
 - **Suggested Git commit:** `fix(web): explain validation errors and check the warehouse before recording`
+
+---
+
+## Scan-first redesign W4 — Orders list, order detail and "Nhận hàng hoàn" in `web/`
+
+- **Files added:** `web/src/pages/OrdersPage.tsx`, `web/src/pages/OrderDetailPage.tsx`, `web/src/pages/ReturnPage.tsx`, `web/src/components/AuthVideo.tsx`, `web/src/components/wizard.tsx`, `web/src/lib/orderStatus.ts`
+- **Files changed:** `web/src/App.tsx`, `web/src/lib/api.ts`, `web/src/lib/types.ts`, `web/src/pages/NewOrderPage.tsx`, `web/src/styles.css`
+- **Previous behavior:** "Đơn hàng", order detail and "Nhận hàng hoàn" were placeholder pages.
+- **New behavior:**
+  - `/orders` lists orders with search by tracking code or order ID, which videos exist and one combined status (Chờ video đóng gói, Chờ hàng hoàn, Chờ kiểm tra, Đang kiểm tra, Cần xem xét, Khớp, Có sai lệch, Kiểm tra lỗi).
+  - `/orders/:orderId` shows the order details and plays both videos. Videos are fetched with the auth header and played from an object URL. A missing video links to the screen that adds it.
+  - `/returns/new` scans the label with a return scan: an unknown code says no order was found; an order that already has a return video links to the order; otherwise the person records or (demo) attaches the opening video, which is uploaded with progress. An order without a packing video gets a warning but can still receive the return video.
+  - The step indicator and progress bar are shared components.
+- **Not included:** starting an inspection and showing its result from `web/` (still done in `frontend/`), and replacing an existing return video.
+- **Tests executed:** `npm run typecheck`, Prettier and build in `web/` OK. In headless Chrome against a throwaway database, as the owner: 9 orders listed; search finds one and shows an empty state for an unknown code; a detail page plays the packing video; return flow for an unknown code, for an order with a return video, and for `TRK-1004` with a file upload, after which the detail page plays both videos with status "Chờ kiểm tra". Phone layout checked at 390x844. No page errors.
+- **Suggested Git commit:** `feat(web): add orders list, order detail and return receiving screens`

@@ -1,8 +1,9 @@
 import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { IconCheck, IconPlus } from "../components/icons";
 import { LabelScanner } from "../components/LabelScanner";
-import { Alert, Button, Card, cx, ErrorAlert, LinkButton, PageHeader, Pill, Spinner } from "../components/ui";
+import { Alert, Button, Card, ErrorAlert, LinkButton, PageHeader, Pill, Spinner } from "../components/ui";
 import { VideoCapture, type Capture } from "../components/VideoCapture";
+import { ProgressBar, Stepper } from "../components/wizard";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useHealth } from "../lib/health";
@@ -54,30 +55,6 @@ const optional = (value: string) => value.trim() || undefined;
 
 /** Same rule as the backend's warehouseId. */
 const WAREHOUSE_ID = /^[A-Za-z0-9_.-]{1,64}$/;
-
-const Stepper = ({ step, skipped }: { step: Step; skipped?: Step }) => {
-    const current = step === "done" ? STEPS.length : STEPS.findIndex((s) => s.id === step);
-    return (
-        <ol className="stepper">
-            {STEPS.map((s, i) => {
-                const state = i < current ? "done" : i === current ? "current" : "todo";
-                return (
-                    <li
-                        key={s.id}
-                        className={cx("step", `step-${state}`)}
-                        aria-current={state === "current" ? "step" : undefined}
-                    >
-                        <span className="step-num">{state === "done" ? <IconCheck size={16} /> : i + 1}</span>
-                        <span className="step-label">
-                            {s.label}
-                            {skipped === s.id && <span className="step-note"> (đơn đã có)</span>}
-                        </span>
-                    </li>
-                );
-            })}
-        </ol>
-    );
-};
 
 const Field = ({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) => (
     <label className="field">
@@ -168,21 +145,6 @@ const WarehouseField = ({
         </Field>
     );
 };
-
-const ProgressBar = ({ value }: { value: number }) => (
-    <div
-        className="upload-progress"
-        role="progressbar"
-        aria-valuenow={Math.round(value * 100)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-    >
-        <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${Math.round(value * 100)}%` }} />
-        </div>
-        <span>Đang tải video lên… {Math.round(value * 100)}%</span>
-    </div>
-);
 
 /**
  * Add an order: scan the shipping label (the tracking code is filled in and locked), enter the order details,
@@ -321,7 +283,7 @@ export const NewOrderPage = () => {
                 subtitle="Quét nhãn vận đơn, nhập thông tin rồi quay video đóng gói."
                 backTo="/orders"
             />
-            <Stepper step={step} skipped={addingToExisting ? "details" : undefined} />
+            <Stepper steps={STEPS} step={step} skipped={addingToExisting ? "details" : undefined} />
 
             {step === "scan" && (
                 <Card title="Bước 1 · Quét mã vận đơn">

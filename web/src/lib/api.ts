@@ -105,6 +105,19 @@ export const upload = <T>(path: string, form: FormData, onProgress?: (fraction: 
         xhr.send(form);
     });
 
+/** Fetch a protected file with the auth header and return an object URL for it. */
+export const fetchObjectUrl = async (path: string): Promise<string> => {
+    const token = tokenStore.get();
+    let response: Response;
+    try {
+        response = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    } catch {
+        throw new ApiError(0, "NETWORK_ERROR", "The server could not be reached");
+    }
+    if (!response.ok) throw new ApiError(response.status, "HTTP_ERROR", `Could not load file (${response.status})`);
+    return URL.createObjectURL(await response.blob());
+};
+
 export interface EvidenceUpload {
     type: "outbound" | "return";
     scanId: string;
@@ -118,6 +131,15 @@ export const api = {
     login: (email: string, password: string) =>
         request<{ token: string; user: User }>("POST", "/api/auth/login", { email, password }),
     me: () => request<{ user: User }>("GET", "/api/auth/me"),
+
+    listOrders: (search: string) =>
+        request<{ orders: Order[] }>(
+            "GET",
+            `/api/orders?limit=100${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        ),
+    getOrder: (orderId: string) => request<{ order: Order }>("GET", `/api/orders/${encodeURIComponent(orderId)}`),
+    listMedia: (orderId: string) =>
+        request<{ media: Media[] }>("GET", `/api/orders/${encodeURIComponent(orderId)}/media`),
 
     scan: (code: string, purpose: ScanPurpose, method: ScanMethod) =>
         request<{ scan: Scan; order: Order | null }>("POST", "/api/scans", { code, purpose, method }),

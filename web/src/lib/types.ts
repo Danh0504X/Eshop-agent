@@ -40,6 +40,7 @@ export interface Order {
     packingMedia: string[];
     returnMedia: string[];
     inspectionStatus: string;
+    latestClaimId?: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -48,6 +49,11 @@ export interface Media {
     _id: string;
     type: "outbound" | "return";
     status: string;
+    originalName?: string;
+    mimeType: string;
+    sizeBytes: number;
+    uploadedAt: string;
+    metadata?: { durationSec?: number };
     capture?: { scanMethod: ScanMethod; manualEntry?: boolean; captureMethod: "recorded" | "file" };
     fileUrl: string;
 }
