@@ -148,11 +148,27 @@ const ERROR_TITLES: Record<string, string> = {
     UNSUPPORTED_MEDIA_TYPE: "Định dạng file không được hỗ trợ.",
 };
 
+const FIELD_MESSAGES: Record<string, string> = {
+    warehouseId: "Mã kho chỉ gồm chữ không dấu, số và các ký tự . _ - (không có dấu cách).",
+    "product.name": "Tên sản phẩm không được để trống.",
+    expectedQuantity: "Số lượng phải là số nguyên từ 1 đến 10.000.",
+    expectedAccessories: "Danh sách phụ kiện chưa hợp lệ.",
+    scanId: "Phiên quét không hợp lệ, hãy quét lại nhãn.",
+};
+
+/** Field-by-field text for a validation error; the backend reports one entry per broken rule. */
+const describeFields = (details: unknown[]): string | undefined => {
+    const paths = details.flatMap((d) => (d as { path?: string }).path ?? []);
+    const lines = [...new Set(paths)].map((path) => FIELD_MESSAGES[path] ?? `Trường "${path}" chưa hợp lệ.`);
+    return lines.length ? lines.join(" ") : undefined;
+};
+
 /** A short Vietnamese message for the person; the backend's own message is kept as detail. */
 export const describeError = (error: unknown): { title: string; detail?: string } => {
     if (error instanceof ApiError) {
         const title = ERROR_TITLES[error.code] ?? "Đã xảy ra lỗi, vui lòng thử lại.";
-        return error.code === "NETWORK_ERROR" ? { title } : { title, detail: error.message };
+        if (error.code === "NETWORK_ERROR") return { title };
+        return { title, detail: describeFields(error.details) ?? error.message };
     }
     return { title: "Đã xảy ra lỗi, vui lòng thử lại.", detail: error instanceof Error ? error.message : undefined };
 };

@@ -301,3 +301,13 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
   - API client: `api.scan`, `api.createOrder`, `api.uploadEvidence` (XMLHttpRequest for upload progress). Shared `ScanMethod` type in `lib/types`.
 - **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `web/` OK. Drove the screen in headless Chrome against a throwaway in-memory database: camera scan of a generated Code 128 label → locked code → details with two accessories and a customer name → 3 s recording → order `ORD-261030-JH52` created; the API showed the scanned tracking code, all details, one packing video (`recorded`, `video/webm`, scan `camera`) and no customer data for the employee. Rescanning the same label showed the existing order without the add-video action. A photo of the label of an existing order without video led to adding a packing video from a file (`file` / `image_file`). Phone layout checked at 390x844. No console errors. One earlier run timed out waiting for the confirm button after recording; two later runs passed without warnings and the cause was not identified.
 - **Suggested Git commit:** `feat(web): add the scan-first "Thêm đơn" wizard`
+
+---
+
+## Scan-first redesign W3 fix — Clear validation errors in "Thêm đơn"
+
+- **Files changed:** `web/src/lib/api.ts`, `web/src/pages/NewOrderPage.tsx`
+- **Problem:** creating an order could fail at the very end with only "Thông tin chưa hợp lệ. Request validation failed". The backend's `warehouseId` accepts only letters without diacritics, digits and `. _ -`, and owner accounts type the warehouse by hand, so values like `Kho Hà Nội` were rejected after the video had already been recorded. The UI ignored the field details the backend returned.
+- **New behavior:** step 2 checks the warehouse, product name and quantity before moving on to the video; the warehouse field explains the allowed characters; validation errors from the backend are shown per field in Vietnamese.
+- **Tests executed:** `npm run typecheck` and Prettier in `web/` OK. In headless Chrome against a throwaway database, as the owner: `Kho Hà Nội` is stopped at step 2; `kho1` creates the order and uploads the video; a simulated backend validation error shows the field messages. The exact value that caused the reported failure was not confirmed.
+- **Suggested Git commit:** `fix(web): explain validation errors and check the warehouse before recording`

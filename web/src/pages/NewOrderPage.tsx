@@ -52,6 +52,9 @@ const SCAN_LABEL: Record<ScanMethod, string> = {
 
 const optional = (value: string) => value.trim() || undefined;
 
+/** Same rule as the backend's warehouseId. */
+const WAREHOUSE_ID = /^[A-Za-z0-9_.-]{1,64}$/;
+
 const Stepper = ({ step, skipped }: { step: Step; skipped?: Step }) => {
     const current = step === "done" ? STEPS.length : STEPS.findIndex((s) => s.id === step);
     return (
@@ -155,7 +158,7 @@ const WarehouseField = ({
             </Field>
         );
     return (
-        <Field label="Kho *">
+        <Field label="Kho *" hint="Chữ không dấu, số và các ký tự . _ - (không có dấu cách).">
             <input
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
@@ -201,7 +204,7 @@ export const NewOrderPage = () => {
     /** The order being completed: created here, or the existing one when adding its packing video. */
     const [order, setOrder] = useState<Order | null>(null);
     const [details, setDetails] = useState<Details>(() => emptyDetails(user));
-    const [quantityError, setQuantityError] = useState<string | null>(null);
+    const [formError, setFormError] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [progress, setProgress] = useState<number | null>(null);
     const [submitError, setSubmitError] = useState<unknown>(null);
@@ -243,13 +246,18 @@ export const NewOrderPage = () => {
 
     const submitDetails = (e: FormEvent) => {
         e.preventDefault();
+        // Catch these here, before the person spends time recording the video.
         const quantity = Number(details.quantity);
-        if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) {
-            setQuantityError("Số lượng phải là số nguyên từ 1 đến 10.000.");
-            return;
+        let problem: string | null = null;
+        if (!WAREHOUSE_ID.test(details.warehouseId.trim())) {
+            problem = "Mã kho chỉ gồm chữ không dấu, số và các ký tự . _ - (không có dấu cách). Ví dụ: wh-hcm.";
+        } else if (!details.name.trim()) {
+            problem = "Tên sản phẩm không được để trống.";
+        } else if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) {
+            problem = "Số lượng phải là số nguyên từ 1 đến 10.000.";
         }
-        setQuantityError(null);
-        setStep("video");
+        setFormError(problem);
+        if (!problem) setStep("video");
     };
 
     const finish = async (capture: Capture) => {
@@ -266,7 +274,7 @@ export const NewOrderPage = () => {
                 };
                 const { order: created } = await api.createOrder({
                     scanId: scan.id,
-                    warehouseId: details.warehouseId,
+                    warehouseId: details.warehouseId.trim(),
                     product: {
                         name: details.name.trim(),
                         description: optional(details.description),
@@ -419,7 +427,7 @@ export const NewOrderPage = () => {
                                 <input value={details.sku} onChange={set("sku")} maxLength={100} />
                             </Field>
                         </div>
-                        {quantityError && <p className="form-error">{quantityError}</p>}
+                        {formError && <p className="form-error">{formError}</p>}
                         <Field label="Mô tả">
                             <textarea
                                 rows={2}
