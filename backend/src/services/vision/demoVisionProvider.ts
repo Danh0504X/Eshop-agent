@@ -19,8 +19,6 @@ export const DEMO_SCENARIOS = [
     "empty_package",
     "minor_dent",
     "blurry",
-    "missing_identifier",
-    "mismatched_identifier",
     "low_confidence",
     "sensitive_info",
     "product_scratch",
@@ -39,10 +37,7 @@ export class DemoVisionProvider implements VisionProvider {
         const scenario = (request.demoContext?.scenario ?? "normal") as DemoScenario;
         const ids = request.frames.map((f) => f.frameId);
         const base = baseline(request, ids);
-        const analysis =
-            request.evidenceType === "outbound"
-                ? applyOutbound(base, scenario)
-                : applyReturn(base, scenario, request, ids);
+        const analysis = request.evidenceType === "outbound" ? base : applyReturn(base, scenario, request, ids);
         return { analysis, model: null };
     }
 
@@ -90,7 +85,6 @@ const hasSegmentFrames = (ids: string[]) => ids.some(isSegmentFrameId);
 
 const baseline = (request: VisionRequest, ids: string[]): VisionAnalysis => {
     const ctx = request.demoContext;
-    const some = ids.slice(0, Math.min(3, ids.length));
     const mid = ids.slice(Math.floor(ids.length / 2), Math.floor(ids.length / 2) + 2);
     return {
         packageContents: "items_present",
@@ -114,12 +108,6 @@ const baseline = (request: VisionRequest, ids: string[]): VisionAnalysis => {
         totalItemCount: { value: request.expected.expectedQuantity, status: "observed", frameIds: mid },
         accessories: request.expected.expectedAccessories.map((name) => ({ name, status: "present", frameIds: mid })),
         packagingCondition: { overall: "intact", observations: [] },
-        visibleIdentifiers: ctx
-            ? [
-                  { text: ctx.orderId, kind: "order_id", frameIds: some.slice(0, 1) },
-                  { text: ctx.trackingCode, kind: "tracking_code", frameIds: some.slice(0, 1) },
-              ]
-            : [],
         imageConditions: { lighting: "good", focus: "sharp", continuity: "appears_continuous", notes: DEMO_NOTE },
         privacy: { framesWithPeople: [], framesWithPersonalData: [] },
         suspectedInstructionText: [],
@@ -127,11 +115,6 @@ const baseline = (request: VisionRequest, ids: string[]): VisionAnalysis => {
         uncertaintyNotes: [DEMO_NOTE],
         overallConfidence: 0.9,
     };
-};
-
-const applyOutbound = (a: VisionAnalysis, scenario: DemoScenario): VisionAnalysis => {
-    if (scenario === "missing_identifier") return { ...a, visibleIdentifiers: [] };
-    return a;
 };
 
 const applyReturn = (
@@ -219,13 +202,6 @@ const applyReturn = (
                 imageConditions: { lighting: "poor", focus: "blurry", continuity: "cannot_assess", notes: DEMO_NOTE },
                 uncertaintyNotes: [DEMO_NOTE, "Frames are too dark and blurry to confirm product details"],
                 overallConfidence: 0.35,
-            };
-        case "missing_identifier":
-            return { ...a, visibleIdentifiers: [] };
-        case "mismatched_identifier":
-            return {
-                ...a,
-                visibleIdentifiers: [{ text: "ORD-OTHER-999", kind: "order_id", frameIds: ids.slice(0, 1) }],
             };
         case "low_confidence":
             return {

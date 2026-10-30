@@ -22,8 +22,6 @@ export interface VisionRequest {
     /** Only read by the demo provider to pick predefined results. Never sent to a real AI provider. */
     demoContext?: {
         scenario?: string;
-        orderId: string;
-        trackingCode: string;
         color?: string;
         model?: string;
     };

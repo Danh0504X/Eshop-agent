@@ -163,14 +163,6 @@ describe("FixIt agent with the deterministic planner (demo analysis)", () => {
         expect(result.recommendedAction).toMatch(/Upload the missing evidence/);
     });
 
-    it("case 6b: no visible order identifier blocks a conclusion even with discrepancies", async () => {
-        spyProvider();
-        const { result, claim } = await inspect({ scenario: "missing_identifier" });
-        expect(result.status).toBe("needs_review");
-        expect(result.escalation?.reasons).toContain("ORDER_ID_NOT_VISIBLE");
-        expect(claim).toBeNull();
-    });
-
     it("case 7: dark or blurry footage is escalated before any AI call", async () => {
         const provider = spyProvider();
         const dark = await inspect({ returned: "dark" });
@@ -181,12 +173,17 @@ describe("FixIt agent with the deterministic planner (demo analysis)", () => {
         expect(provider.calls).toBe(0);
     });
 
-    it("case 8: mismatched order identifiers escalate without a claim", async () => {
-        spyProvider();
-        const { result, claim } = await inspect({ scenario: "mismatched_identifier" });
+    it("case 8: evidence recorded for another order escalates before any AI call", async () => {
+        const provider = spyProvider();
+        const { order, inspection } = await setup();
+        const other = await createOrder({ orderId: `ORD-AG-X${seq}`, trackingCode: `TRK-AG-X${seq}` });
+        const foreign = await createMediaFromFile(other, "return", await makeVideo("normal"), owner.principal.userId);
+        await Order.updateOne({ _id: order._id }, { $set: { returnMedia: [foreign._id] } });
+        const result = await runInspection(inspection.id, { planner: new DeterministicPlanner() });
         expect(result.status).toBe("needs_review");
         expect(result.escalation?.reasons).toContain("ORDER_ID_MISMATCH");
-        expect(claim).toBeNull();
+        expect(result.claimId).toBeFalsy();
+        expect(provider.calls).toBe(0);
     });
 
     it("low model confidence escalates instead of concluding", async () => {

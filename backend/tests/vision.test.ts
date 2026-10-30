@@ -30,7 +30,6 @@ const sampleAnalysis = (overrides: Partial<VisionAnalysis> = {}): VisionAnalysis
     totalItemCount: { value: 1, status: "observed", frameIds: ["RET-01"] },
     accessories: [],
     packagingCondition: { overall: "intact", observations: [] },
-    visibleIdentifiers: [],
     imageConditions: { lighting: "good", focus: "sharp", continuity: "appears_continuous", notes: "" },
     privacy: { framesWithPeople: [], framesWithPersonalData: [] },
     suspectedInstructionText: [],

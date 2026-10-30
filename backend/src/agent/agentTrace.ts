@@ -101,7 +101,7 @@ export const summarizeToolResult = (tool: string, data: Data): { headline: strin
                     `product ${obs(item?.productType)} | qty ${obs(data.totalItemCount)} | colour ${obs(item?.color)} | model ${obs(item?.model)}`,
                     `product condition: ${describeCondition(item?.condition)}`,
                     `accessories: ${(data.accessories ?? []).map((a: Data) => `${a.name}=${a.status}`).join(", ") || "none listed"} | packaging: ${data.packagingCondition?.overall ?? "?"}`,
-                    `identifiers seen: ${(data.visibleIdentifierKinds ?? []).map((v: Data) => v.kind).join(", ") || "none"} | image: ${data.imageConditions?.lighting} light, ${data.imageConditions?.focus}, ${data.imageConditions?.continuity}`,
+                    `image: ${data.imageConditions?.lighting} light, ${data.imageConditions?.focus}, ${data.imageConditions?.continuity}`,
                     ...(data.instructionLikeTextFound
                         ? [
                               `WARNING: ${data.instructionLikeTextFound} instruction-like text(s) found in footage (ignored)`,

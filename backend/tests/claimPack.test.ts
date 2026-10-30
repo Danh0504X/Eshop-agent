@@ -42,11 +42,7 @@ const setup = async (scenario: DemoScenario, overrides: Record<string, unknown> 
     await extractFrames(out.id);
     await extractFrames(ret.id);
     const order = (await Order.findById(created._id)) as OrderDoc;
-    const { outbound, returned } = await demoPair(scenario, {
-        orderId,
-        trackingCode: `TRK-${orderId}`,
-        expectedQuantity: order.expectedQuantity,
-    });
+    const { outbound, returned } = await demoPair(scenario, { expectedQuantity: order.expectedQuantity });
     const comparison = compareAnalyses(outbound, returned, order, 0.7);
     const validation = await validateEvidence({
         order,
@@ -99,9 +95,7 @@ describe("report and claim pack", () => {
         const ctx = await setup("mismatch", {
             customer: { name: "Le Van C", phone: "0900 111 222", address: "99 Hai Ba Trung Street, Hanoi" },
         });
-        const sensitive = (
-            await demoPair("sensitive_info", { orderId: ctx.order.orderId, trackingCode: ctx.order.trackingCode })
-        ).returned;
+        const sensitive = (await demoPair("sensitive_info")).returned;
         ctx.analyses.return.result.packagingCondition = sensitive.result.packagingCondition;
         // A frame cited by the findings is flagged as showing a person.
         ctx.analyses.return.result.privacy = { framesWithPeople: ["RET-05"], framesWithPersonalData: [] };
@@ -159,10 +153,10 @@ describe("report and claim pack", () => {
             message: expect.stringMatching(/no claim is needed/),
         });
 
-        const mismatchedId = await setup("mismatched_identifier");
-        expect(mismatchedId.validation.blocking).toBe(true);
+        const lowConfidence = await setup("low_confidence");
+        expect(lowConfidence.validation.blocking).toBe(true);
         await expect(
-            buildClaimPack({ ...mismatchedId, principal: owner.principal, actorType: "agent" }),
+            buildClaimPack({ ...lowConfidence, principal: owner.principal, actorType: "agent" }),
         ).rejects.toMatchObject({
             message: expect.stringMatching(/blocking issues/),
         });

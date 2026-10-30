@@ -2,7 +2,7 @@ import type { AnalysisRecord } from "../agent/schemas";
 import { env } from "../config/env";
 import { MediaEvidence, type MediaDoc, type MediaType } from "../models/MediaEvidence";
 import type { OrderDoc } from "../models/Order";
-import { normalizeCode, type ComparisonResult } from "./comparisonService";
+import type { ComparisonResult } from "./comparisonService";
 import { storage } from "./storageService";
 import { verifyFramesOnDisk } from "./videoProcessingService";
 
@@ -20,7 +20,6 @@ export type EscalationCode =
     | "POSSIBLE_DISCONTINUITY"
     | "ANALYSIS_UNUSABLE"
     | "LOW_CONFIDENCE"
-    | "ORDER_ID_NOT_VISIBLE"
     | "ORDER_ID_MISMATCH"
     | "KEY_ATTRIBUTE_UNVERIFIABLE"
     | "INSTRUCTION_TEXT_IN_FOOTAGE"
@@ -243,8 +242,7 @@ export const validateEvidence = async (input: ValidationInput): Promise<Evidence
 };
 
 const validateAnalyses = (input: ValidationInput, checks: ValidationCheck[], reason: (r: EscalationReason) => void) => {
-    const { order, analyses = {}, stage } = input;
-    const expectedIds = new Set([normalizeCode(order.orderId), normalizeCode(order.trackingCode)]);
+    const { analyses = {}, stage } = input;
 
     for (const type of TYPES) {
         const record = analyses[type];
@@ -322,46 +320,6 @@ const validateAnalyses = (input: ValidationInput, checks: ValidationCheck[], rea
                 blocking: false,
                 evidenceType: type,
                 message: `The ${LABEL[type]} contains text that reads like instructions to the AI; it was ignored and needs human review`,
-            });
-        }
-
-        // Order association via identifiers visible on labels.
-        const ids = a.visibleIdentifiers.filter((v) => v.kind === "order_id" || v.kind === "tracking_code");
-        const mismatched = ids.filter((v) => !expectedIds.has(normalizeCode(v.text)));
-        if (mismatched.length) {
-            checks.push({
-                name: "order_identifier",
-                evidenceType: type,
-                status: "fail",
-                detail: `Visible identifier(s) ${mismatched.map((m) => `${m.text} (${m.frameIds.join(", ")})`).join("; ")} do not match the order`,
-            });
-            reason({
-                code: "ORDER_ID_MISMATCH",
-                blocking: true,
-                evidenceType: type,
-                message: `The ${LABEL[type]} shows identifier ${mismatched[0].text}, which does not match order ${order.orderId}`,
-            });
-        } else if (ids.length === 0) {
-            checks.push({
-                name: "order_identifier",
-                evidenceType: type,
-                status: env.REQUIRE_VISIBLE_ORDER_ID ? "fail" : "warn",
-                detail: "No order ID or tracking code is legible in the analysed frames",
-            });
-            if (env.REQUIRE_VISIBLE_ORDER_ID) {
-                reason({
-                    code: "ORDER_ID_NOT_VISIBLE",
-                    blocking: true,
-                    evidenceType: type,
-                    message: `The ${LABEL[type]} does not show a legible order ID or tracking code, so it cannot be reliably matched to the order`,
-                });
-            }
-        } else {
-            checks.push({
-                name: "order_identifier",
-                evidenceType: type,
-                status: "pass",
-                detail: `Matches (${ids.map((i) => i.frameIds.join(",")).join("; ")})`,
             });
         }
     }

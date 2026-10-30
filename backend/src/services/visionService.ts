@@ -83,8 +83,6 @@ export const analyzeEvidence = async (
             provider.source === "demo"
                 ? {
                       scenario: order.demoScenario ?? undefined,
-                      orderId: order.orderId,
-                      trackingCode: order.trackingCode,
                       color: product.color ?? undefined,
                       model: product.model ?? undefined,
                   }

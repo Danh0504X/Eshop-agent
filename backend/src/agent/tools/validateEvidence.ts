@@ -8,7 +8,7 @@ export const validateEvidenceTool = defineTool({
     name: "validate_evidence",
     description:
         "Check evidence completeness and usability. Called once after lookup_order (presence, readability) and again after " +
-        "compare_items as final verification (frame quality, continuity, visible order identifiers, confidence). " +
+        "compare_items as final verification (frame quality, continuity, analysis usability, confidence). " +
         "Returns escalation reasons; blocking reasons mean you must call notify_human.",
     schema: z.object({}).strict(),
     plannerVisible: true,

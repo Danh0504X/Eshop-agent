@@ -2,8 +2,6 @@ import type { AnalysisRecord } from "../src/agent/schemas";
 import { DemoVisionProvider, type DemoScenario } from "../src/services/vision/demoVisionProvider";
 
 export const ORDER_CTX = {
-    orderId: "ORD-T1",
-    trackingCode: "TRK-T1",
     productName: "Wireless Headphones",
     expectedQuantity: 1,
     expectedAccessories: ["charging cable"],
@@ -34,7 +32,7 @@ export const demoRecord = async (
             expectedQuantity: c.expectedQuantity,
             expectedAccessories: c.expectedAccessories,
         },
-        demoContext: { scenario, orderId: c.orderId, trackingCode: c.trackingCode, color: c.color, model: c.model },
+        demoContext: { scenario, color: c.color, model: c.model },
     });
     return {
         mediaId: `${evidenceType}-media`,

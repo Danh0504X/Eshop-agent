@@ -37,7 +37,6 @@ export const summarizeAnalysis = (record: AnalysisRecord) => {
         totalItemCount: a.totalItemCount,
         accessories: a.accessories,
         packagingCondition: a.packagingCondition,
-        visibleIdentifierKinds: a.visibleIdentifiers.map((v) => ({ kind: v.kind, frameIds: v.frameIds })),
         imageConditions: a.imageConditions,
         overallConfidence: a.overallConfidence,
         uncertaintyNotes: a.uncertaintyNotes,

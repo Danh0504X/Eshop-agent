@@ -81,7 +81,9 @@ describe("GeminiVisionProvider (mocked client)", () => {
         expect(parts.filter((p) => p.inlineData?.mimeType === "image/jpeg")).toHaveLength(2);
         expect(parts[0].text).toBe("Frame RET-01 at t=0.5s");
         expect(params.config.responseMimeType).toBe("application/json");
-        expect(Object.keys(params.config.responseJsonSchema.properties)).toContain("visibleIdentifiers");
+        const fields = Object.keys(params.config.responseJsonSchema.properties);
+        expect(fields).toContain("packageContents");
+        expect(fields).not.toContain("visibleIdentifiers"); // the tracking code is bound by scanning, not read by AI
         expect(params.config.systemInstruction).toMatch(/untrusted data/);
     });
 

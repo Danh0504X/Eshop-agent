@@ -185,3 +185,19 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Tests executed:** typecheck OK; `npm test` 158 passed, 2 skipped (161 before: the 3 refund tests were removed). Tests that relied on high-value orders now use `useAdvisoryDemoProvider()` (demo vision plus instruction-like text) and still cover claim + advisory review task, closing the advisory review on a claim decision, and refusing a retry while a draft claim is undecided. The PDF privacy test's positive control is now the product model. Build OK.
 - **Real API test:** not applicable (no AI behaviour changed).
 - **Suggested Git commit:** `refactor(orders): remove declared value, high-value rule and refund tracking`
+
+---
+
+## Scan-first redesign B2 — Stop reading the tracking code from the video
+
+- **Files changed:** `backend/src/agent/schemas.ts`, `backend/src/agent/tools/analyzeItem.ts`, `backend/src/agent/tools/validateEvidence.ts`, `backend/src/agent/agentTrace.ts`, `backend/src/services/evidenceValidationService.ts`, `backend/src/services/reviewService.ts`, `backend/src/services/visionService.ts`, `backend/src/services/vision/types.ts`, `backend/src/services/vision/demoVisionProvider.ts`, `backend/src/config/env.ts`, `backend/.env.example`, tests (`fixtures`, `claimPack`, `evidenceValidation`, `fixitAgent`, `geminiVision`, `vision`)
+- **Previous behavior:** the vision model transcribed order IDs and tracking codes from labels (`visibleIdentifiers`). Final verification blocked with `ORDER_ID_NOT_VISIBLE` when a video showed no legible code (`REQUIRE_VISIBLE_ORDER_ID=true`) and with `ORDER_ID_MISMATCH` when it showed a different one.
+- **New behavior:**
+  - `visibleIdentifiers` is removed from the vision schema (and therefore from the JSON schema sent to Gemini), from the planner's analysis summary and from the console trace. The model no longer reads order identifiers.
+  - `ORDER_ID_NOT_VISIBLE` and `REQUIRE_VISIBLE_ORDER_ID` are gone. `ORDER_ID_MISMATCH` remains only as the backend check that a linked video was recorded for this order and shop.
+  - Demo scenarios `missing_identifier` and `mismatched_identifier` are removed; the demo context no longer carries order identifiers.
+  - Binding a video to its order moves to the scan step (B3/B4).
+- **Compatibility impact:** stored analyses that still contain `visibleIdentifiers` are ignored by the code. `REQUIRE_VISIBLE_ORDER_ID` in an existing `.env` is ignored. Privacy flags (`framesWithPeople`, `framesWithPersonalData`) are unchanged, so PDF frame blurring still works.
+- **Tests executed:** typecheck OK; `npm test` 156 passed, 2 skipped (158 before: the two "no visible order identifier" tests were removed). Both "case 8" tests now link a video recorded for another order and expect a blocking `ORDER_ID_MISMATCH`; the agent version also asserts that no AI call is made. The claim-pack refusal test uses `low_confidence` as its blocking case. The Gemini request test asserts the schema no longer contains `visibleIdentifiers`. Build OK.
+- **Real API test:** not run.
+- **Suggested Git commit:** `refactor(vision): stop reading order identifiers from footage`

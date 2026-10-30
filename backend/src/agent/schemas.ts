@@ -69,13 +69,6 @@ export const VisionAnalysisSchema = z.object({
             }),
         ),
     }),
-    visibleIdentifiers: z.array(
-        z.object({
-            text: z.string(),
-            kind: z.enum(["order_id", "tracking_code", "sku", "barcode", "other"]),
-            frameIds: z.array(z.string()),
-        }),
-    ),
     imageConditions: z.object({
         lighting: z.enum(["good", "poor", "unusable"]),
         focus: z.enum(["sharp", "blurry", "unusable"]),
@@ -190,10 +183,6 @@ export const normalizeAnalysis = (
                 frameIds: filterIds(o.frameIds, `packagingCondition.observations[${i}]`),
             })),
         },
-        visibleIdentifiers: raw.visibleIdentifiers.map((v, i) => ({
-            ...v,
-            frameIds: filterIds(v.frameIds, `visibleIdentifiers[${i}]`),
-        })),
         privacy: {
             framesWithPeople: raw.privacy.framesWithPeople.filter((id) => known.has(id)),
             framesWithPersonalData: raw.privacy.framesWithPersonalData.filter((id) => known.has(id)),
