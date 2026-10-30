@@ -1,4 +1,4 @@
-import type { Media, NewOrderInput, Order, Scan, ScanMethod, ScanPurpose, User } from "./types";
+import type { Inspection, Media, NewOrderInput, Order, Scan, ScanMethod, ScanPurpose, User } from "./types";
 
 const TOKEN_KEY = "fixit.web.token";
 /** Fired when the backend rejects the stored token, so the app can return to the login screen. */
@@ -140,6 +140,11 @@ export const api = {
     getOrder: (orderId: string) => request<{ order: Order }>("GET", `/api/orders/${encodeURIComponent(orderId)}`),
     listMedia: (orderId: string) =>
         request<{ media: Media[] }>("GET", `/api/orders/${encodeURIComponent(orderId)}/media`),
+
+    startInspection: (orderId: string) =>
+        request<{ inspection: Inspection }>("POST", `/api/orders/${encodeURIComponent(orderId)}/inspect`),
+    getInspection: (id: string) => request<{ inspection: Inspection }>("GET", `/api/inspections/${id}`),
+    retryInspection: (id: string) => request<{ inspection: Inspection }>("POST", `/api/inspections/${id}/retry`),
 
     scan: (code: string, purpose: ScanPurpose, method: ScanMethod) =>
         request<{ scan: Scan; order: Order | null }>("POST", "/api/scans", { code, purpose, method }),

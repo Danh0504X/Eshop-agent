@@ -327,3 +327,17 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Not included:** starting an inspection and showing its result from `web/` (still done in `frontend/`), and replacing an existing return video.
 - **Tests executed:** `npm run typecheck`, Prettier and build in `web/` OK. In headless Chrome against a throwaway database, as the owner: 9 orders listed; search finds one and shows an empty state for an unknown code; a detail page plays the packing video; return flow for an unknown code, for an order with a return video, and for `TRK-1004` with a file upload, after which the detail page plays both videos with status "Chờ kiểm tra". Phone layout checked at 390x844. No page errors.
 - **Suggested Git commit:** `feat(web): add orders list, order detail and return receiving screens`
+
+---
+
+## Scan-first redesign W5 — AI inspection from the order page in `web/`
+
+- **Files added:** `web/src/components/InspectionCard.tsx`, `web/src/components/AuthImage.tsx`, `web/src/lib/inspectionText.ts`
+- **Files changed:** `web/src/pages/OrderDetailPage.tsx`, `web/src/lib/api.ts`, `web/src/lib/types.ts`, `web/src/styles.css`, `backend/src/app.ts`
+- **New behavior:**
+  - The order page has a "Kiểm tra bằng AI" card once both videos exist. It starts the inspection, polls every 1.5 s and shows three plain steps (check videos, AI analysis, compare and conclude). A finished result loads again when the order is reopened; "Kiểm tra lại" retries a failed or escalated inspection and runs a new one otherwise.
+  - The result is a one-line verdict in Vietnamese, the reasons a person must look, the observed differences with severity and one supporting frame from each video, attributes that could not be verified, and the neutral "not proof of wrongdoing" note. Demo results are labelled. Agent logs stay in the terminal; backend text is only available under a collapsed "Chi tiết kỹ thuật".
+  - **Terminal log:** successful `GET /api/inspections/:id` requests are no longer printed by the HTTP logger, because polling put a line between agent trace lines every 1.5 s. Failed requests are still logged.
+- **Not included:** values read by the AI (for example model and colour) are shown as the model wrote them, in English; the draft claim is only mentioned, as the claim screens are the next step.
+- **Tests executed:** `npm run typecheck`, Prettier and build in `web/` OK; backend typecheck OK and `npm test` 175 passed, 3 skipped. In headless Chrome against a throwaway database in demo mode (no Gemini calls): `ORD-001` matches, `ORD-003` shows model and colour differences with frames and a draft claim, `ORD-005` (dark video) asks for a person and gives the reason, `ORD-004` without a return video offers no button, reopening loads the result and retry works. With repeated polling the log had no successful polling line while a request with a bad ID was still logged. **Not yet run with real Gemini.**
+- **Suggested Git commits:** `chore(backend): keep inspection polling out of the terminal log`, `feat(web): run the AI inspection and show its result on the order page`

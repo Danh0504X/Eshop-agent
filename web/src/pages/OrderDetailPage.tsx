@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "react-router";
 import { AuthVideo } from "../components/AuthVideo";
 import { IconReturn } from "../components/icons";
+import { InspectionCard } from "../components/InspectionCard";
 import { Card, EmptyState, ErrorAlert, LinkButton, PageHeader, Pill, Spinner } from "../components/ui";
 import { formatDuration, formatSize } from "../components/VideoCapture";
 import { api } from "../lib/api";
@@ -87,6 +88,7 @@ export const OrderDetailPage = () => {
 
     const status = orderStatus(order);
     const product = order.product;
+    const latest = order.latestInspectionId;
     return (
         <>
             <PageHeader
@@ -96,6 +98,13 @@ export const OrderDetailPage = () => {
                 actions={<Pill tone={status.tone}>{status.label}</Pill>}
             />
             <div className="order-detail">
+                <InspectionCard
+                    key={order.orderId}
+                    orderId={order.orderId}
+                    initialInspectionId={typeof latest === "object" ? latest._id : latest}
+                    ready={order.packingMedia.length > 0 && order.returnMedia.length > 0}
+                    onChanged={() => void api.getOrder(orderId).then((result) => setOrder(result.order))}
+                />
                 <Card title="Thông tin đơn">
                     <dl className="meta-list">
                         <dt>Sản phẩm</dt>

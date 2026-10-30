@@ -89,7 +89,8 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 | `43cbc9c` | `web/`: màn hình Thêm đơn 3 bước |
 | `7354c3b` | `web/`: báo lỗi validation theo từng trường, kiểm tra mã kho ở bước 2 |
 | `ebac469` | docs: thêm tài liệu bối cảnh và kế hoạch này |
-| (commit tiếp theo) | `web/`: danh sách đơn, chi tiết đơn kèm video, màn hình Nhận hàng hoàn |
+| `74ada57` | `web/`: danh sách đơn, chi tiết đơn kèm video, màn hình Nhận hàng hoàn |
+| (2 commit tiếp theo) | Backend: bỏ log hỏi tiến độ khỏi terminal; `web/`: nút Kiểm tra bằng AI, tiến trình và kết quả trên trang đơn |
 
 **Phát hiện quan trọng trong quá trình làm:**
 - **Lỗ hổng của B3, đã sửa ở B4:** quét `packing` một mã đã có đơn từng trả lỗi 409, nên không còn cách nào bổ sung video đóng gói cho đơn đó.
@@ -125,8 +126,8 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 
 | Bước | Nội dung |
 |---|---|
-| 9 | **Đã có:** danh sách đơn, chi tiết đơn kèm video. **Còn:** thẻ kết quả kiểm tra (câu tiếng Việt, ảnh frame làm căn cứ) |
-| 10 | **Đã có:** Nhận hàng hoàn: quét → tìm đơn → quay/tải video hoàn trả. **Còn:** nút chạy kiểm tra AI → tiến trình → kết quả (hiện vẫn chạy ở `frontend/`) |
+| 9 | **Xong:** danh sách đơn, chi tiết đơn kèm video, thẻ kết quả kiểm tra |
+| 10 | **Xong:** Nhận hàng hoàn; nút Kiểm tra bằng AI → tiến trình → kết quả. **Chưa chạy với Gemini thật** |
 | 11 | Khiếu nại: danh sách, chi tiết, PDF, duyệt / từ chối |
 | 12 | `web/README.md` + cập nhật tài liệu |
 

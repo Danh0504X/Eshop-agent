@@ -1054,6 +1054,144 @@ a.order-row:hover {
     font-size: 13px;
 }
 
+.section-label {
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 650;
+}
+
+.plain-list {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding-left: 20px;
+}
+
+.running-text {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+}
+
+.running-text .spinner-sm {
+    border-color: var(--border);
+    border-top-color: var(--accent);
+}
+
+.progress-steps {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    color: var(--text-subtle);
+}
+
+.progress-steps li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.progress-steps li.current {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.progress-steps li.current .step-num {
+    background: var(--accent);
+    color: #fff;
+}
+
+.progress-steps li.done {
+    color: var(--text-muted);
+}
+
+.progress-steps li.done .step-num {
+    background: var(--ok-soft);
+    color: var(--ok);
+}
+
+.finding-list {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.finding {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.finding-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.finding-title {
+    font-weight: 650;
+}
+
+.finding-compare {
+    color: var(--text-muted);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+.finding-compare b {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.finding-frames {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 240px));
+    gap: 8px;
+}
+
+.finding-frames figure {
+    margin: 0;
+}
+
+.finding-frames img,
+.image-placeholder {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 6px;
+    background: var(--surface-muted);
+    object-fit: cover;
+}
+
+.finding-frames figcaption {
+    margin-top: 4px;
+    color: var(--text-subtle);
+    font-size: 12.5px;
+}
+
+.technical {
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.technical summary {
+    cursor: pointer;
+}
+
+.technical p {
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+}
+
 /* ---------------------------------------------------------------------------------------------------------------
    Camera: label scanner and video recorder
    --------------------------------------------------------------------------------------------------------------- */

@@ -41,6 +41,8 @@ export interface Order {
     returnMedia: string[];
     inspectionStatus: string;
     latestClaimId?: string;
+    /** An ID, or the inspection itself when the backend populated it. */
+    latestInspectionId?: string | { _id: string };
     createdAt: string;
     updatedAt: string;
 }
@@ -56,6 +58,30 @@ export interface Media {
     metadata?: { durationSec?: number };
     capture?: { scanMethod: ScanMethod; manualEntry?: boolean; captureMethod: "recorded" | "file" };
     fileUrl: string;
+}
+
+export interface Finding {
+    id: string;
+    category: string;
+    severity: "info" | "low" | "medium" | "high" | "critical";
+    outboundObservation: string | null;
+    returnObservation: string | null;
+    evidence: Array<{ frameId: string; type: "outbound" | "return"; timestampSec: number | null }>;
+}
+
+export interface Inspection {
+    _id: string;
+    status: "pending" | "processing" | "needs_review" | "completed" | "failed";
+    workflowState: string;
+    analysisMode: "real" | "demo";
+    comparison?: { findings: Finding[]; unverifiedAttributes: string[] };
+    frameReferences: Array<{ frameId: string; imageUrl: string | null }>;
+    escalation?: { reasons: string[] };
+    reviewTask?: { status?: string; reasons?: string[] };
+    claimId?: string;
+    error?: string;
+    createdAt: string;
+    finishedAt?: string;
 }
 
 export interface NewOrderInput {
