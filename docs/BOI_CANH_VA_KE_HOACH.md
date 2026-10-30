@@ -32,6 +32,7 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 2. validate_evidence (1)   đủ 2 video? đúng đơn? đọc được? video có đi qua phiên quét nhãn không?
 3-4. extract_frames ×2     FFmpeg: 8 frame/video, đo sáng/nét, tính liên tục → cổng chất lượng sớm
 5-6. analyze_item ×2       Gemini mô tả TỪNG video riêng (JSON có cấu trúc, mỗi thuộc tính observed/uncertain/not_visible)
+                           2 lượt gọi chạy đồng thời; bỏ frame tối/mờ; dùng lại kết quả tốt nếu video không đổi
 7. compare_items           CODE so sánh 2 bản mô tả → findings
 8. validate_evidence (2)   kiểm tra cuối: confidence, ảnh dùng được, thuộc tính then chốt
 9. build_claim_pack        chỉ khi không có lý do chặn và có sai lệch đáng kể
@@ -90,13 +91,15 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 | `7354c3b` | `web/`: báo lỗi validation theo từng trường, kiểm tra mã kho ở bước 2 |
 | `ebac469` | docs: thêm tài liệu bối cảnh và kế hoạch này |
 | `74ada57` | `web/`: danh sách đơn, chi tiết đơn kèm video, màn hình Nhận hàng hoàn |
-| (2 commit tiếp theo) | Backend: bỏ log hỏi tiến độ khỏi terminal; `web/`: nút Kiểm tra bằng AI, tiến trình và kết quả trên trang đơn |
+| `e997079` | Backend: bỏ log hỏi tiến độ khỏi terminal |
+| `eb80520` | `web/`: nút Kiểm tra bằng AI, tiến trình và kết quả trên trang đơn |
+| (chưa commit) | Agent: tăng tốc `analyze_item`: thinking `LOW`, phân tích 2 video đồng thời, bỏ frame tối/mờ, dùng lại kết quả khi video không đổi |
 
 **Phát hiện quan trọng trong quá trình làm:**
 - **Lỗ hổng của B3, đã sửa ở B4:** quét `packing` một mã đã có đơn từng trả lỗi 409, nên không còn cách nào bổ sung video đóng gói cho đơn đó.
 - **Video WebM quay bằng `MediaRecorder` không ghi độ dài trong header** (`duration=N/A`). `probeVideo` giờ tính độ dài từ timestamp của packet; đã kiểm chứng với file Chrome quay thật: 3,2 s.
 - **Chrome báo hỗ trợ codec VP9 nhưng quay ra file rỗng (0 byte).** App giờ ưu tiên VP8, và không cho dùng bản quay rỗng.
-- **Backend:** 175 test pass, 3 skip (2 test gọi API thật, 1 test kiểm tra thời gian quay đang tắt).
+- **Backend:** 187 test pass, 3 skip (2 test gọi API thật, 1 test kiểm tra thời gian quay đang tắt).
 
 ---
 
@@ -107,15 +110,14 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 1. **Chạy kiểm tra thật với Gemini và đọc log trace.**
    - Chỉnh trace cho dễ theo dõi và debug, ví dụ: khối tóm tắt quyết định cuối, chi tiết từng finding khi so sánh, thời gian của từng bước.
    - **Còn chờ:** dùng cặp video thật hay video seed. Video seed chỉ là hình mẫu tổng hợp, nên kết quả gần như chắc chắn là "cần người xem". Lần chạy này tốn quota Gemini, khoảng 2 lượt AI với planner `deterministic`.
+   - **Đo đợt tăng tốc `analyze_item`:** chưa đo với Gemini thật. So các dòng `Gemini Vision model (...) replied in ...` trên cùng một cặp video, và so cả chất lượng đọc ở `LOW` với mức cũ.
 2. **Sửa lỗi bất đối xứng tên sản phẩm.** Gemini mô tả 2 video trong 2 lần gọi độc lập, nên cùng một sản phẩm có thể bị gọi bằng hai tên khác nhau và bị tính là sai lệch. Code hiện so chuỗi tuyệt đối ở [comparisonService.ts](../backend/src/services/comparisonService.ts).
    - **Lớp 1, prompt:** `productType` chỉ là một danh từ chung tiếng Anh; `model` chỉ chép từ chữ in thấy trong frame, không lấy từ checklist.
    - **Lớp 2, code so sánh:** ưu tiên khớp model; bỏ tên brand ở đầu model; so `productType` theo từ; bỏ dấu tiếng Việt bằng chuẩn hóa Unicode thay vì xóa ký tự. Không cho phép kiểu "chuỗi này chứa chuỗi kia" với model, để `SW-200` và `SW-200-LITE` vẫn bị bắt là sai lệch.
    - **Lớp 3, xác minh bằng hình:** khi vẫn thấy khác, thêm tool `verify_product_match` cho Gemini xem ảnh của cả 2 video trong cùng một lần gọi, trả về `same` / `different` / `uncertain`. Code vẫn là bên quyết định mức độ và có tạo claim hay không.
 3. **Giảm chi phí AI:**
-   - đặt thinking level riêng cho vision (hiện `GEMINI_THINKING_LEVEL` đang để trống, dùng mặc định của model)
-   - không gửi frame tối hoặc mờ cho Gemini (hiện vẫn gửi cả 8 frame)
-   - dừng sớm nếu video đóng gói đã dính lỗi chặn
-   - cache kết quả phân tích khi retry
+   - **Xong:** thinking level `LOW`, không gửi frame tối hoặc mờ, dùng lại kết quả khi kiểm tra lại
+   - **Còn lại:** dừng sớm nếu video đóng gói đã dính lỗi chặn
 4. **Planner hybrid:** code chạy các bước bắt buộc 1–7; chỉ gọi Gemini planner khi kết quả so sánh còn điểm chưa rõ. Ca rõ ràng chỉ tốn 2 lượt AI.
 5. **Cân nhắc sau:**
    - bật lại kiểm tra thời gian quay
@@ -150,6 +152,8 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
   - frontend cũ: `cd frontend` → `npm run dev` (cổng 5173)
 - **Thử camera:** đăng nhập rồi mở `http://localhost:5174/dev/devices`. Trên điện thoại: `npm run dev:https`, rồi mở địa chỉ `https://<IP-máy>:5174` và chấp nhận chứng chỉ tự ký.
 - **Theo dõi agent:** để `AGENT_TRACE=true` rồi xem terminal của backend; mỗi dòng có dạng `[FixIt <mã đơn> +<giây>s] ...`.
+- **Dùng lại kết quả phân tích:** "Kiểm tra lại" với video không đổi sẽ không gọi Gemini, trace ghi `REUSED`. Muốn ép AI đọc lại, đặt `AI_ANALYSIS_CACHE=false` rồi khởi động lại backend. Đổi prompt, schema, model, thinking level, frame hoặc checklist của đơn thì tự phân tích lại; riêng sửa code `normalizeAnalysis` thì không.
+- **Đổi `backend/.env` cần khởi động lại backend**, vì nodemon chỉ theo dõi `src`.
 
 ---
 

@@ -341,3 +341,27 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Not included:** values read by the AI (for example model and colour) are shown as the model wrote them, in English; the draft claim is only mentioned, as the claim screens are the next step.
 - **Tests executed:** `npm run typecheck`, Prettier and build in `web/` OK; backend typecheck OK and `npm test` 175 passed, 3 skipped. In headless Chrome against a throwaway database in demo mode (no Gemini calls): `ORD-001` matches, `ORD-003` shows model and colour differences with frames and a draft claim, `ORD-005` (dark video) asks for a person and gives the reason, `ORD-004` without a return video offers no button, reopening loads the result and retry works. With repeated polling the log had no successful polling line while a request with a bad ID was still logged. **Not yet run with real Gemini.**
 - **Suggested Git commits:** `chore(backend): keep inspection polling out of the terminal log`, `feat(web): run the AI inspection and show its result on the order page`
+
+---
+
+## Faster `analyze_item` — thinking level, parallel videos, frame filter, reuse
+
+- **Files added:** `backend/tests/analysisSpeed.test.ts`
+- **Files changed:** `backend/src/agent/tools/analyzeItem.ts`, `backend/src/agent/agentState.ts`, `backend/src/agent/agentTrace.ts`, `backend/src/agent/schemas.ts`, `backend/src/services/visionService.ts`, `backend/src/services/vision/geminiVisionProvider.ts`, `backend/src/services/mediaService.ts`, `backend/src/models/MediaEvidence.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/tests/fixitAgent.test.ts`
+- **Previous behavior:** the two videos were analysed one after the other, every extracted frame was sent when there were no more than `MAX_FRAMES_PER_ANALYSIS`, the model's default thinking level applied, and every run called the AI again.
+- **New behavior:**
+  - **Thinking level:** `.env.example` now sets `GEMINI_THINKING_LEVEL=LOW`. An unset value still means the model's default.
+  - **Parallel videos:** the first `analyze_item` that needs the AI also starts the other video's request. That video's own `analyze_item` call then waits for the result. Tools still run one at a time, so the workflow states, the planner and the tool log keep their order, and `inspection.save()` is never called concurrently. Each request is charged to the budget when it starts. A failed request is retried alone.
+  - **Frame filter:** `selectFrames` leaves out dark and blurry frames, and falls back to all frames when fewer than 3 are clear. Video-level quality checks still use the ratios measured on all frames.
+  - **Reuse:** a good AI analysis is stored on the media document (`analysisCache`, not returned by the API) and reused by later runs without an AI request or budget charge. The key covers provider, model, thinking level, effort, system prompt, schema, the order's checklist and the selected frames. "Good" means source `ai`, confidence at least `CONFIDENCE_THRESHOLD` and lighting and focus not `unusable`, so running a weak result again is a real second attempt. Analyses with segment frames are not stored. `AI_ANALYSIS_CACHE=false` turns this off.
+  - **Terminal log:** new lines for the parallel start and `frames sent: N of M extracted`; a reused result says `REUSED from an earlier run, no AI call`; Gemini log lines and errors name the video, for example `Vision model (return)`.
+- **Reason:** `analyze_item` was the slowest step. Output and comparison rules are unchanged.
+- **Compatibility impact:** `AnalysisRecord` gains an optional `reused` field. No migration: existing media simply have no stored analysis.
+- **Tests executed:** typecheck OK; `npm test` 187 passed, 3 skipped; Prettier and build OK. Tests use a delayed provider reporting as `ai`: two requests overlap, either video failing retries only that video, reuse makes no new calls, a replaced video or changed checklist, thinking level or provider analyses again, and weak results are not kept. **Not yet measured with real Gemini.**
+- **Known limitations:**
+  - `LOW` may read small print or fine damage less well; compare on real videos and use `MEDIUM` if so.
+  - The sharpness check can mark a frame blurry because of hand movement, so a frame showing the item in motion may be left out.
+  - If one video's request fails for good, the other video's request has already been spent.
+  - A good but wrong analysis is reused until something in the key changes or `AI_ANALYSIS_CACHE=false`. Changing `normalizeAnalysis` does not invalidate stored results.
+  - The time shown for each `analyze_item` no longer equals that video's AI time, because the second call only waits for what is left. Use the `replied in` lines.
+- **Suggested Git commit:** `feat(agent): speed up analyze_item with parallel videos, frame filter and result reuse`
