@@ -126,7 +126,9 @@ export const mapGeminiError = (error: unknown, label: string): ApiErrorLike => {
             );
         if (status === 400) return aiError(`${label}: Gemini rejected the request: ${googleMessage(error)}`, false);
         if (status >= 500) return aiError(`${label}: Gemini service error (${status})`, true);
-        return aiError(`${label}: Gemini error (${status})`, false);
+        if (status === 402)
+            return aiError(`${label}: Gemini payment required (402). Gemini says: ${googleMessage(error)}`, false);
+        return aiError(`${label}: Gemini error (${status}): ${googleMessage(error)}`, false);
     }
     if (error instanceof Error) {
         if (

@@ -144,6 +144,8 @@ describe("GeminiVisionProvider (mocked client)", () => {
             [new GenAiApiError({ message: "internal", status: 500 }), /service error/, true],
             [new GenAiApiError({ message: "bad key", status: 403 }), /API key/, false],
             [new GenAiApiError({ message: "no model", status: 404 }), /gemini:models/, false],
+            [new GenAiApiError({ message: "no credit", status: 402 }), /payment required \(402\).*no credit/, false],
+            [new GenAiApiError({ message: "odd", status: 418 }), /Gemini error \(418\): odd/, false],
             [
                 Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }),
                 /timed out/,
