@@ -35,6 +35,13 @@ const MediaRow = ({ media, user, onChanged }: { media: Media; user: User; onChan
                     ` · dark ${(q.darkFrameRatio * 100).toFixed(0)}% · blurry ${((q.blurryFrameRatio ?? 0) * 100).toFixed(0)}% · ${q.continuous ? "continuous" : "possible gap"}`}
                 {media.processingError && <span className="error"> · {media.processingError}</span>}
             </div>
+            <div className="small muted">
+                {media.capture
+                    ? `Label ${media.capture.manualEntry ? "typed by hand" : `scanned (${media.capture.scanMethod})`} · ${
+                          media.capture.captureMethod === "recorded" ? "recorded in the app" : "attached file"
+                      }`
+                    : "Not uploaded through a label scan"}
+            </div>
             <div className="row">
                 <AuthVideo src={media.fileUrl} />
                 {user.role === "owner" && (
@@ -51,6 +58,7 @@ const MediaRow = ({ media, user, onChanged }: { media: Media; user: User; onChan
 export const EvidencePanel = ({ orderId, user, onChanged }: { orderId: string; user: User; onChanged: () => void }) => {
     const [media, setMedia] = useState<Media[]>([]);
     const [type, setType] = useState<"outbound" | "return">("outbound");
+    const [code, setCode] = useState("");
     const [replace, setReplace] = useState(false);
     const [reason, setReason] = useState("");
     const fileRef = useRef<HTMLInputElement>(null);
@@ -68,16 +76,22 @@ export const EvidencePanel = ({ orderId, user, onChanged }: { orderId: string; u
         e.preventDefault();
         const file = fileRef.current?.files?.[0];
         if (!file) return upload.setError("Choose a video file first");
-        const form = new FormData();
-        form.append("type", type);
-        if (replace) {
-            form.append("replaceExisting", "true");
-            form.append("replacementReason", reason);
-        }
-        form.append("file", file);
+        if (!code.trim()) return upload.setError("Enter the tracking code printed on the label");
         void upload.run(async () => {
+            // Every video is bound to a scan of the order's label; this UI records the typed code as a manual scan.
+            const { scan } = await api.scan(code.trim(), type === "outbound" ? "packing" : "return");
+            const form = new FormData();
+            form.append("type", type);
+            form.append("scanId", scan.id);
+            form.append("captureMethod", "file");
+            if (replace) {
+                form.append("replaceExisting", "true");
+                form.append("replacementReason", reason);
+            }
+            form.append("file", file);
             await api.uploadMedia(orderId, form);
             if (fileRef.current) fileRef.current.value = "";
+            setCode("");
             setReplace(false);
             setReason("");
             await refresh();
@@ -113,6 +127,11 @@ export const EvidencePanel = ({ orderId, user, onChanged }: { orderId: string; u
                     <option value="outbound">Outbound packing video</option>
                     <option value="return">Return opening video</option>
                 </select>
+                <input
+                    placeholder="Tracking code on the label *"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                />
                 <input
                     ref={fileRef}
                     type="file"

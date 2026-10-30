@@ -15,6 +15,19 @@ export interface Health {
     analysisMode: "real" | "demo";
     aiModel: string | null;
     planner: string;
+    allowFileEvidence?: boolean;
+}
+
+/** A shipping-label scan. This UI has no scanner, so its codes are recorded as typed by hand ("manual"). */
+export interface Scan {
+    id: string;
+    code: string;
+    purpose: "packing" | "return";
+    method: string;
+    manualEntry: boolean;
+    orderId: string | null;
+    scannedAt: string;
+    expiresAt: string;
 }
 
 export interface Order {
@@ -25,8 +38,7 @@ export interface Order {
     product: { name: string; description?: string; sku?: string; model?: string; color?: string };
     expectedQuantity: number;
     expectedAccessories: string[];
-    declaredValue: number;
-    currency: string;
+    trackingScan?: { method?: string; manualEntry?: boolean; scannedAt?: string };
     customer?: { name?: string; phone?: string; address?: string };
     inspectionStatus: string;
     latestInspectionId?: string | { _id: string; status: string; summary?: string; recommendedAction?: string };
@@ -53,6 +65,7 @@ export interface Media {
     frames: Frame[];
     quality?: { darkFrameRatio?: number; blurryFrameRatio?: number; maxTimestampGapSec?: number; continuous?: boolean };
     processingError?: string;
+    capture?: { scanMethod: string; manualEntry?: boolean; captureMethod: "recorded" | "file"; scannedAt?: string };
     fileUrl: string;
 }
 
@@ -184,16 +197,6 @@ export interface Claim {
         fullyAnonymized?: boolean;
         privacyReviewRequired?: boolean;
         notes?: string[];
-    };
-    currency: string;
-    requestedCompensation?: number;
-    actualRefund?: number;
-    refund?: {
-        discrepancyAmount?: number;
-        flagged?: boolean;
-        paymentVerified?: boolean;
-        recordedAt?: string;
-        note?: string;
     };
     approval?: { decision?: string; reason?: string; decidedAt?: string; finalDetermination?: string };
     history: Array<{ at: string; by: string; from?: string; to: string; reason?: string }>;

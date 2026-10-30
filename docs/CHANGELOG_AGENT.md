@@ -242,3 +242,18 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Tests executed:** typecheck OK; `npm test` 175 passed, 3 skipped (9 new: 7 active in `evidenceCapture.test.ts` covering capture recording, required fields, wrong kind / other label / other user / reused scan, manual entry, file uploads disabled without using up the scan, a long recorded video accepted while the timing check is disabled, and a live WebM without a duration header that uploads and extracts 8 frames; plus `EVIDENCE_NOT_SCANNED` in evidence validation and in the agent, which makes no AI call). The timing-check test is kept as `it.skip` for when the check is re-enabled. Existing upload tests now scan first; test helpers bind fixture videos to a scan unless `scanned: false`. Build OK.
 - **Real API test:** not applicable (no AI calls).
 - **Suggested Git commit:** `feat(evidence): require a label scan for every evidence upload`
+
+---
+
+## Scan-first redesign F0 — Minimal update of the old demo frontend
+
+- **Files changed:** `frontend/src/types.ts`, `frontend/src/services/api.ts`, `frontend/src/components/CreateOrderForm.tsx`, `frontend/src/components/EvidencePanel.tsx`, `frontend/src/components/ClaimPanel.tsx`, `frontend/src/pages/ClaimsPage.tsx`, `frontend/src/pages/OrdersPage.tsx`
+- **Previous behavior:** after B1–B4 the old `frontend/` could no longer create orders (it sent `orderId`, `trackingCode`, `declaredValue`) or upload videos (no scan), and its refund form called a removed endpoint.
+- **New behavior:**
+  - The order form has no order ID, declared value or currency. Submitting records a packing scan of the typed tracking code (`method: manual`) and creates the order from it; the backend generates the order ID. A code that already has an order is reported instead of creating a duplicate.
+  - The evidence form asks for the tracking code printed on the label, records a packing or return scan for it (`manual`) and uploads the file with `captureMethod: file` (requires `ALLOW_FILE_EVIDENCE=true`).
+  - Evidence rows show how each video was bound (label scanned or typed by hand; recorded in the app or attached file); the order view marks tracking codes typed by hand.
+  - Refund tracking (claim panel and claims list column) and the declared value row are removed.
+- **Compatibility impact:** this UI has no scanner, so every order and video it creates is marked as a manual entry. The new `web/` frontend replaces it for the scan-first workflow.
+- **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `frontend/` OK. The request sequences it uses (manual packing scan → create order; packing/return scan → upload with `captureMethod=file`) are covered by the backend API tests. Not clicked through in a browser.
+- **Suggested Git commit:** `fix(frontend): adapt the demo UI to scan-bound orders and evidence`

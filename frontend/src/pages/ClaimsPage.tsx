@@ -44,7 +44,6 @@ export const ClaimsPage = ({ user }: { user: User }) => {
                             <th>Order</th>
                             <th>Status</th>
                             <th>Findings</th>
-                            <th>Refund</th>
                             <th>Updated</th>
                         </tr>
                     </thead>
@@ -62,15 +61,6 @@ export const ClaimsPage = ({ user }: { user: User }) => {
                                     <Badge value={c.status} />
                                 </td>
                                 <td>{c.findings.length}</td>
-                                <td>
-                                    {c.refund?.flagged ? (
-                                        <Badge value="shortfall" />
-                                    ) : c.refund?.recordedAt ? (
-                                        "ok"
-                                    ) : (
-                                        "-"
-                                    )}
-                                </td>
                                 <td className="small">{fmtDate(c.updatedAt)}</td>
                             </tr>
                         ))}
