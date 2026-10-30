@@ -49,41 +49,52 @@ describe("health and auth", () => {
 
 describe("orders", () => {
     const body = {
-        orderId: "ORD-API-1",
-        trackingCode: "TRK-API-1",
         warehouseId: "wh-1",
         product: { name: "Smart Watch", color: "silver" },
         expectedQuantity: 1,
     };
+    const packingScan = async (user: TestUser, code: string) =>
+        (await request(app).post("/api/scans").set(auth(user)).send({ code, purpose: "packing", method: "camera" }))
+            .body.data.scan.id as string;
+    let createdOrderId: string;
 
-    it("creates an order and validates input", async () => {
-        const res = await request(app).post("/api/orders").set(auth(owner)).send(body);
+    it("creates an order from a packing scan and validates input", async () => {
+        const scanId = await packingScan(owner, "TRK-API-1");
+        const res = await request(app)
+            .post("/api/orders")
+            .set(auth(owner))
+            .send({ ...body, scanId });
         expect(res.status).toBe(201);
-        expect(res.body.data.order.shopId).toBe("shop-a");
+        expect(res.body.data.order).toMatchObject({ shopId: "shop-a", trackingCode: "TRK-API-1" });
+        createdOrderId = res.body.data.order.orderId;
 
-        const dup = await request(app).post("/api/orders").set(auth(owner)).send(body);
+        const dup = await request(app)
+            .post("/api/orders")
+            .set(auth(owner))
+            .send({ ...body, scanId });
         expect(dup.status).toBe(409);
 
         const invalid = await request(app)
             .post("/api/orders")
             .set(auth(owner))
-            .send({ ...body, orderId: "../etc" });
+            .send({ ...body, scanId: "../etc" });
         expect(invalid.status).toBe(400);
         expect(invalid.body.code).toBe("VALIDATION_ERROR");
     });
 
     it("stops employees from creating orders outside their warehouses", async () => {
+        const scanId = await packingScan(employee, "TRK-API-2");
         const res = await request(app)
             .post("/api/orders")
             .set(auth(employee))
-            .send({ ...body, orderId: "ORD-API-2", warehouseId: "wh-9" });
+            .send({ ...body, warehouseId: "wh-9", scanId });
         expect(res.status).toBe(403);
     });
 
     it("isolates shops and warehouses", async () => {
         await createOrder({ orderId: "ORD-WH2", warehouseId: "wh-2" });
 
-        const otherShop = await request(app).get("/api/orders/ORD-API-1").set(auth(otherShopOwner));
+        const otherShop = await request(app).get(`/api/orders/${createdOrderId}`).set(auth(otherShopOwner));
         expect(otherShop.status).toBe(404);
         const otherList = await request(app).get("/api/orders").set(auth(otherShopOwner));
         expect(otherList.body.data.orders).toHaveLength(0);

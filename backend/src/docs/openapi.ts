@@ -65,6 +65,7 @@ export const openApiDocument = {
     tags: [
         { name: "System" },
         { name: "Auth" },
+        { name: "Scans" },
         { name: "Orders" },
         { name: "Evidence" },
         { name: "Inspections" },
@@ -114,6 +115,28 @@ export const openApiDocument = {
                 },
             },
         },
+        "/api/scans": {
+            post: {
+                tags: ["Scans"],
+                summary: "Record a shipping-label scan (packing: before creating the order; return: finds the order)",
+                description:
+                    "Every order and evidence video is bound to a scan of its label instead of the AI reading the code " +
+                    "from footage. A scan expires after SCAN_SESSION_TTL_MINUTES. Packing scans of a code that already " +
+                    "has an order return 409 (with the order ID when the caller may open it).",
+                requestBody: jsonBody(ref("CreateScan")),
+                responses: {
+                    ...ok(
+                        "Scan recorded",
+                        {
+                            type: "object",
+                            properties: { scan: ref("Scan"), order: { ...ref("Order"), nullable: true } },
+                        },
+                        "201",
+                    ),
+                    ...errors(400, 401, 403, 404, 409),
+                },
+            },
+        },
         "/api/orders": {
             get: {
                 tags: ["Orders"],
@@ -142,7 +165,7 @@ export const openApiDocument = {
             },
             post: {
                 tags: ["Orders"],
-                summary: "Create an order",
+                summary: "Create an order from a packing scan (tracking code from the scan, order ID generated)",
                 requestBody: jsonBody(ref("CreateOrder")),
                 responses: {
                     ...ok("Created", { type: "object", properties: { order: ref("Order") } }, "201"),
@@ -436,12 +459,51 @@ export const openApiDocument = {
                     warehouseIds: { type: "array", items: { type: "string" } },
                 },
             },
-            CreateOrder: {
+            CreateScan: {
                 type: "object",
-                required: ["orderId", "trackingCode", "warehouseId", "product", "expectedQuantity"],
+                required: ["code", "purpose", "method"],
                 properties: {
-                    orderId: { type: "string", example: "ORD-100" },
-                    trackingCode: { type: "string", example: "TRK-100" },
+                    code: { type: "string", pattern: "^[A-Za-z0-9_.-]{1,64}$", example: "GHN12345678" },
+                    purpose: { type: "string", enum: ["packing", "return"] },
+                    method: {
+                        type: "string",
+                        enum: ["camera", "image_file", "hand_scanner", "manual"],
+                        description: "manual = typed because the label could not be scanned",
+                    },
+                },
+            },
+            Scan: {
+                type: "object",
+                properties: {
+                    id,
+                    code: { type: "string" },
+                    purpose: { type: "string", enum: ["packing", "return"] },
+                    method: { type: "string" },
+                    manualEntry: { type: "boolean" },
+                    orderId: { type: "string", nullable: true },
+                    scannedAt: { type: "string", format: "date-time" },
+                    expiresAt: { type: "string", format: "date-time" },
+                },
+            },
+            CreateOrder: {
+                allOf: [
+                    ref("OrderDetails"),
+                    {
+                        type: "object",
+                        required: ["scanId"],
+                        properties: {
+                            scanId: {
+                                ...id,
+                                description: "A packing scan made by the caller; supplies the tracking code",
+                            },
+                        },
+                    },
+                ],
+            },
+            OrderDetails: {
+                type: "object",
+                required: ["warehouseId", "product", "expectedQuantity"],
+                properties: {
                     warehouseId: { type: "string", example: "wh-hcm" },
                     product: {
                         type: "object",
@@ -469,11 +531,21 @@ export const openApiDocument = {
             },
             Order: {
                 allOf: [
-                    ref("CreateOrder"),
+                    ref("OrderDetails"),
                     {
                         type: "object",
                         properties: {
                             _id: { type: "string" },
+                            orderId: { type: "string", example: "ORD-261030-7KQ2" },
+                            trackingCode: { type: "string", example: "GHN12345678" },
+                            trackingScan: {
+                                type: "object",
+                                properties: {
+                                    method: { type: "string" },
+                                    manualEntry: { type: "boolean" },
+                                    scannedAt: { type: "string", format: "date-time" },
+                                },
+                            },
                             shopId: { type: "string" },
                             inspectionStatus: { type: "string" },
                             latestInspectionId: { type: "string" },

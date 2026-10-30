@@ -82,6 +82,8 @@ const EnvSchema = z
         FFMPEG_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
 
         CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
+        // A label scan authorises creating the order or uploading its video for this long.
+        SCAN_SESSION_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(30),
         MIN_FRAME_BRIGHTNESS: z.coerce.number().min(0).max(255).default(40),
         MIN_FRAME_SHARPNESS: z.coerce.number().nonnegative().default(15),
         MAX_BAD_FRAME_RATIO: z.coerce.number().min(0).max(1).default(0.5),

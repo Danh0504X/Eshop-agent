@@ -8,6 +8,7 @@ import claimRoute from "./claimRoute";
 import inspectionRoute from "./inspectionRoute";
 import mediaRoute from "./mediaRoute";
 import orderRoute from "./orderRoute";
+import scanRoute from "./scanRoute";
 
 const router = express.Router();
 
@@ -32,6 +33,7 @@ router.get("/openapi.json", (_request, response) => {
 router.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDocument, { customSiteTitle: "FixIt AI Agent API" }));
 
 router.use("/auth", authRoute);
+router.use("/scans", scanRoute);
 router.use("/orders", orderRoute);
 router.use("/media", mediaRoute);
 router.use("/inspections", inspectionRoute);

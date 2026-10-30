@@ -201,3 +201,23 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Tests executed:** typecheck OK; `npm test` 156 passed, 2 skipped (158 before: the two "no visible order identifier" tests were removed). Both "case 8" tests now link a video recorded for another order and expect a blocking `ORDER_ID_MISMATCH`; the agent version also asserts that no AI call is made. The claim-pack refusal test uses `low_confidence` as its blocking case. The Gemini request test asserts the schema no longer contains `visibleIdentifiers`. Build OK.
 - **Real API test:** not run.
 - **Suggested Git commit:** `refactor(vision): stop reading order identifiers from footage`
+
+---
+
+## Scan-first redesign B3 — Label scans and orders created from them
+
+- **Files changed:** `backend/src/models/Order.ts`, `backend/src/models/index.ts`, `backend/src/validators/schemas.ts`, `backend/src/services/orderService.ts`, `backend/src/controllers/order.controller.ts`, `backend/src/routes/api.ts`, `backend/src/docs/openapi.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/tests/foundation.test.ts`, `backend/tests/openapi.test.ts`
+- **Files added:** `backend/src/models/ScanSession.ts`, `backend/src/services/scanService.ts`, `backend/src/controllers/scan.controller.ts`, `backend/src/routes/scanRoute.ts`, `backend/tests/scanFlow.test.ts`
+- **Previous behavior:** `POST /api/orders` took a client-chosen `orderId` and a typed `trackingCode`; nothing tied the order to a physical label, and the same tracking code could be used by several orders.
+- **New behavior:**
+  - `POST /api/scans {code, purpose: packing|return, method: camera|image_file|hand_scanner|manual}` records a label scan with a server timestamp and an expiry (`SCAN_SESSION_TTL_MINUTES`, default 30). The code must look like a tracking code (letters, digits, `.`, `_`, `-`; max 64), so a scanned URL or text QR is rejected.
+    - **packing:** refused with 409 if the shop already has an order for that code; the response names the order only when the caller may open it.
+    - **return:** finds the order within the caller's shop and warehouses (404 other shop, 403 other warehouse) and returns it (customer data only to owners).
+  - `POST /api/orders` now requires `scanId` (a packing scan made by the caller, unexpired) and no longer accepts `orderId` or `trackingCode`. The tracking code comes from the scan; the order ID is generated as `ORD-YYMMDD-XXXX` (server local date, characters without 0/O/1/I/L, regenerated on the rare collision). One tracking code belongs to one order per shop.
+  - The scan is claimed atomically before the order is written, so one scan never creates two orders; if creation fails (for example a warehouse the caller is not assigned to) the scan is released and can be used again.
+  - Orders store `trackingScan {scanId, method, manualEntry, scannedAt, scannedBy}`; `manualEntry` is true when the code was typed because the label could not be scanned. It is a label only and does not change the inspection result.
+  - Scans are audited (`scan.record`); `order.create` audits now include the tracking code and scan method.
+- **Compatibility impact:** the old `frontend/` order form (which sends `orderId`/`trackingCode` without a scan) now gets 400 until its minimal update. Seed and existing orders are unchanged (no `trackingScan`). The tracking-code uniqueness rule is enforced by the service, not by a unique index, so existing databases need no index migration.
+- **Tests executed:** typecheck OK; `npm test` 166 passed, 2 skipped (10 new in `scanFlow.test.ts`: order ID format; packing scan; rejected codes, purposes, methods and anonymous calls; existing code with and without visibility; return-scan lookup and scope; scanned tracking code and generated ID despite client-supplied identifiers; manual entry; concurrent use of one scan; wrong purpose, expired, someone else's and unknown scans; code taken after the scan and scan released after a failed creation). `foundation` order tests now create orders from scans. Build OK.
+- **Real API test:** not applicable (no AI calls).
+- **Suggested Git commit:** `feat(orders): create orders from label scans with generated order IDs`
