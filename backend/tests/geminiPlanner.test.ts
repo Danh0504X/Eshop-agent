@@ -122,6 +122,7 @@ describe("GeminiPlanner function calling", () => {
                 { id: "c6", name: "analyze_item", args: { evidenceType: "return" } },
             ),
             turn("Compare the analyses.", { id: "c7", name: "compare_items" }),
+            turn("The colour descriptions differ: look at both videos.", { id: "c7b", name: "verify_product_match" }),
             turn("Verify evidence before any claim.", { id: "c8", name: "validate_evidence" }),
             turn("Two material discrepancies and no blocking issues: draft the claim.", {
                 id: "c9",
@@ -135,10 +136,10 @@ describe("GeminiPlanner function calling", () => {
         expect(result.status).toBe("completed");
         expect(await Claim.countDocuments({ inspectionId: inspection._id })).toBe(1);
         expect(result.agentNarrative).toMatch(/Draft claim awaits human review/);
+        expect(result.summary).not.toEqual(result.agentNarrative);
 
         // Tools are declared from the registry (planner-visible only) with JSON schemas.
         const declared = requests[0].config.tools[0].functionDeclarations;
-        expect(declared.map((d) => d.name)).not.toContain("track_refund");
         expect(declared.find((d) => d.name === "lookup_order")?.parametersJsonSchema).toMatchObject({ type: "object" });
 
         // The model turn (with its thought signature) is replayed unchanged in the next request.
@@ -222,14 +223,16 @@ describe("GeminiPlanner function calling", () => {
     });
 });
 
+/** A timeout is retried inside callGemini, so one logical request uses up this many scripted steps. */
+const everyAttemptTimesOut = () =>
+    Array.from({ length: env.AI_RETRY_MAX_ATTEMPTS }, () => () => {
+        throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    });
+
 describe("GeminiPlanner failures fall back safely and visibly", () => {
     it("falls back to the deterministic planner on timeout and records it", async () => {
         const { inspection } = await setup({ scenario: "missing_item" });
-        const { client } = scriptedGemini([
-            () => {
-                throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
-            },
-        ]);
+        const { client } = scriptedGemini(everyAttemptTimesOut());
         const result = await runInspection(inspection.id, { planner: new GeminiPlanner(client) });
         expect(result.plannerFallback).toBe(true);
         expect(
@@ -291,11 +294,7 @@ describe("decision trace and provenance", () => {
     it("labels every post-fallback decision as deterministic and records why", async () => {
         const { inspection } = await setup();
         await Inspection.updateOne({ _id: inspection._id }, { $set: { analysisMode: "real" } });
-        const { client } = scriptedGemini([
-            () => {
-                throw Object.assign(new Error("aborted due to timeout"), { name: "TimeoutError" });
-            },
-        ]);
+        const { client } = scriptedGemini(everyAttemptTimesOut());
         const result = await runInspection(inspection.id, { planner: new GeminiPlanner(client) });
 
         const failure = result.agentLog.find((l) => l.kind === "error");

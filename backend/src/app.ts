@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type Request } from "express";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import cors from "cors";
@@ -13,7 +13,11 @@ const app = express();
 
 app.disable("x-powered-by");
 app.use(helmet());
-if (env.NODE_ENV !== "test") app.use(morgan("dev"));
+// Successful progress polling is left out: it would bury the agent trace in the terminal.
+const isProgressPoll = (request: Request, statusCode: number) =>
+    request.method === "GET" && /^\/api\/inspections\/[^/?]+/.test(request.originalUrl) && statusCode < 400;
+if (env.NODE_ENV !== "test")
+    app.use(morgan<Request>("dev", { skip: (req, res) => isProgressPoll(req, res.statusCode) }));
 // Chỉ cho phép frontend đã cấu hình gửi kèm cookie xác thực
 app.use(cors({ origin: env.CLIENT_URL, credentials: true }));
 app.use(express.json({ limit: "100kb" }));

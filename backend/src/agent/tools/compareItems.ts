@@ -1,10 +1,43 @@
 import { z } from "zod";
 import { env } from "../../config/env";
-import { compareAnalyses } from "../../services/comparisonService";
+import { compareAnalyses, type ComparisonResult } from "../../services/comparisonService";
 import { ApiError } from "../../utils/errors";
-import { invalidateVerification, transition } from "../agentState";
+import { invalidateVerification, transition, type AgentContext } from "../agentState";
 import { requireOrder } from "./helpers";
 import { defineTool } from "./types";
+
+/** Put a comparison on the run and the inspection. It must be verified again before any claim. */
+export const storeComparison = (ctx: AgentContext, comparison: ComparisonResult): void => {
+    ctx.comparison = comparison;
+    invalidateVerification(ctx);
+
+    const refs = new Map<string, { frameId: string; mediaId: string; type: string; timestampSec?: number }>();
+    for (const f of comparison.findings) {
+        for (const e of f.evidence) {
+            refs.set(e.frameId, {
+                frameId: e.frameId,
+                mediaId: ctx.analyses[e.type]?.mediaId ?? "",
+                type: e.type,
+                timestampSec: e.timestampSec ?? undefined,
+            });
+        }
+    }
+    ctx.inspection.set({
+        comparison,
+        confidence: {
+            score: comparison.overallConfidence,
+            threshold: env.CONFIDENCE_THRESHOLD,
+            meetsThreshold: comparison.meetsThreshold,
+            calibrated: false,
+        },
+        uncertainty: [
+            ...comparison.unverifiedAttributes.map((a) => `Not verifiable: ${a}`),
+            ...(ctx.analyses.outbound?.result.uncertaintyNotes ?? []),
+            ...(ctx.analyses.return?.result.uncertaintyNotes ?? []),
+        ],
+        frameReferences: [...refs.values()],
+    });
+};
 
 export const compareItemsTool = defineTool({
     name: "compare_items",
@@ -23,38 +56,15 @@ export const compareItemsTool = defineTool({
             ]);
         }
         const comparison = compareAnalyses(outbound, returned, order, env.CONFIDENCE_THRESHOLD);
-        ctx.comparison = comparison;
-        // A new comparison must be verified again before any claim.
-        invalidateVerification(ctx);
-
-        const refs = new Map<string, { frameId: string; mediaId: string; type: string; timestampSec?: number }>();
-        for (const f of comparison.findings) {
-            for (const e of f.evidence) {
-                refs.set(e.frameId, {
-                    frameId: e.frameId,
-                    mediaId: ctx.analyses[e.type]?.mediaId ?? "",
-                    type: e.type,
-                    timestampSec: e.timestampSec ?? undefined,
-                });
-            }
-        }
-        ctx.inspection.set({
-            comparison,
-            confidence: {
-                score: comparison.overallConfidence,
-                threshold: env.CONFIDENCE_THRESHOLD,
-                meetsThreshold: comparison.meetsThreshold,
-                calibrated: false,
-            },
-            uncertainty: [
-                ...comparison.unverifiedAttributes.map((a) => `Not verifiable: ${a}`),
-                ...outbound.result.uncertaintyNotes,
-                ...returned.result.uncertaintyNotes,
-            ],
-            frameReferences: [...refs.values()],
-        });
+        storeComparison(ctx, comparison);
+        ctx.inspection.set("productMatch", undefined);
         await ctx.inspection.save();
         await transition(ctx, "COMPARISON", `${comparison.materialDiscrepancyCount} material discrepancy(ies)`);
-        return { ...comparison, nextStep: "validate_evidence (final verification)" };
+        return {
+            ...comparison,
+            nextStep: comparison.visualChecks.length
+                ? "verify_product_match (the written product descriptions differ)"
+                : "validate_evidence (final verification)",
+        };
     },
 });

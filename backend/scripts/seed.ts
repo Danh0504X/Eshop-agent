@@ -20,6 +20,7 @@ import { Claim } from "../src/models/Claim";
 import { Inspection } from "../src/models/Inspection";
 import { MediaEvidence } from "../src/models/MediaEvidence";
 import { Order } from "../src/models/Order";
+import { ScanSession } from "../src/models/ScanSession";
 import { User } from "../src/models/User";
 import { hashPassword } from "../src/services/authService";
 import { resolveBinaries } from "../src/services/ffmpegService";
@@ -78,7 +79,6 @@ interface DemoOrder {
     product: { name: string; description?: string; sku?: string; model?: string; color?: string };
     expectedQuantity: number;
     expectedAccessories: string[];
-    declaredValue: number;
     customer?: { name: string; phone: string; address: string };
     outbound: Kind | null;
     returned: Kind | null;
@@ -94,7 +94,6 @@ const ORDERS: DemoOrder[] = [
         product: { name: "Wireless Headphones", model: "WH-100", color: "black", sku: "WH100-BLK" },
         expectedQuantity: 1,
         expectedAccessories: ["charging cable", "carry pouch"],
-        declaredValue: 89,
         customer: { name: "Nguyen Van A", phone: "0912 345 678", address: "12 Nguyen Trai Street, District 1" },
         outbound: "packing",
         returned: "return",
@@ -108,7 +107,6 @@ const ORDERS: DemoOrder[] = [
         product: { name: "Silicone Phone Case", model: "PC-15", color: "blue", sku: "PC15-BLU" },
         expectedQuantity: 2,
         expectedAccessories: [],
-        declaredValue: 24,
         outbound: "packing",
         returned: "return",
         note: "One of two items missing - expected draft claim",
@@ -121,7 +119,6 @@ const ORDERS: DemoOrder[] = [
         product: { name: "Smart Watch", model: "SW-200", color: "silver", sku: "SW200-SLV" },
         expectedQuantity: 1,
         expectedAccessories: ["magnetic charger"],
-        declaredValue: 249,
         outbound: "packing",
         returned: "return",
         note: "Different model/colour returned - expected draft claim",
@@ -134,7 +131,6 @@ const ORDERS: DemoOrder[] = [
         product: { name: "Bluetooth Speaker", model: "BS-50", color: "red" },
         expectedQuantity: 1,
         expectedAccessories: ["USB-C cable"],
-        declaredValue: 59,
         outbound: "packing",
         returned: null,
         note: "Return video missing - expected human review; upload one and retry",
@@ -147,7 +143,6 @@ const ORDERS: DemoOrder[] = [
         product: { name: "Mechanical Keyboard", model: "MK-87", color: "white" },
         expectedQuantity: 1,
         expectedAccessories: ["keycap puller"],
-        declaredValue: 129,
         outbound: "packing",
         returned: "dark",
         note: "Return video too dark - expected human review before any AI call",
@@ -160,10 +155,9 @@ const ORDERS: DemoOrder[] = [
         product: { name: "Mirrorless Camera Body", model: "MC-9", color: "black" },
         expectedQuantity: 1,
         expectedAccessories: ["battery", "body cap"],
-        declaredValue: 1450,
         outbound: "packing",
         returned: "return",
-        note: "High-value mismatch - draft claim plus mandatory review task",
+        note: "Different camera body returned - expected draft claim",
     },
     {
         orderId: "ORD-007",
@@ -173,7 +167,6 @@ const ORDERS: DemoOrder[] = [
         product: { name: "Wireless Earbuds", model: "EB-3", color: "white" },
         expectedQuantity: 1,
         expectedAccessories: ["charging case"],
-        declaredValue: 79,
         outbound: null,
         returned: null,
         note: "No evidence yet - use it to try uploads from the UI",
@@ -186,7 +179,6 @@ const ORDERS: DemoOrder[] = [
         product: { name: "Fitness Tracker", model: "FT-3", color: "black" },
         expectedQuantity: 1,
         expectedAccessories: ["charging clip"],
-        declaredValue: 69,
         outbound: "packing",
         returned: "return",
         note: "Casing unclear at first - with AGENT_PLANNER=gemini the agent can inspect a segment, re-analyse and claim",
@@ -199,7 +191,6 @@ const ORDERS: DemoOrder[] = [
         product: { name: "Desk Lamp", model: "DL-1", color: "white" },
         expectedQuantity: 1,
         expectedAccessories: [],
-        declaredValue: 35,
         outbound: "packing",
         returned: "return",
         note: "Different warehouse - invisible to the demo employee (warehouse isolation)",
@@ -221,6 +212,7 @@ const reset = async () => {
         Inspection.deleteMany({ shopId: { $in: shops } }),
         Order.deleteMany({ shopId: { $in: shops } }),
         AuditLog.deleteMany({ shopId: { $in: shops } }),
+        ScanSession.deleteMany({ shopId: { $in: shops } }),
         User.deleteMany({ shopId: { $in: shops } }),
     ]);
     console.info("Removed existing demo data.");
@@ -248,6 +240,18 @@ const attachVideo = async (
     const data = fs.readFileSync(file);
     const key = `media/${order.shopId}/${order.orderId}/${type}-${crypto.randomUUID()}.mp4`;
     await storage().writeBuffer(key, data);
+    // Every video is bound to a scan of the order's label; demo videos are attached as files.
+    const scan = await ScanSession.create({
+        shopId: order.shopId,
+        scannedBy: uploadedBy,
+        code: order.trackingCode,
+        purpose: type === "outbound" ? "packing" : "return",
+        method: "hand_scanner",
+        orderRef: order._id,
+        orderId: order.orderId,
+        expiresAt: new Date(),
+        mediaLinkedAt: new Date(),
+    });
     const media = await MediaEvidence.create({
         orderId: order.orderId,
         orderRef: order._id,
@@ -261,7 +265,15 @@ const attachVideo = async (
         sha256: crypto.createHash("sha256").update(data).digest("hex"),
         uploadedBy,
         status: "linked",
+        capture: {
+            scanId: scan._id,
+            scanMethod: scan.method,
+            scannedAt: scan.createdAt,
+            scannedBy: uploadedBy,
+            captureMethod: "file",
+        },
     });
+    await ScanSession.updateOne({ _id: scan._id }, { $set: { mediaRef: media._id } });
     order.set(type === "outbound" ? "packingMedia" : "returnMedia", [media._id]);
 };
 

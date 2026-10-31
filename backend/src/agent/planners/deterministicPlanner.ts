@@ -55,6 +55,9 @@ export class DeterministicPlanner implements Planner {
                 if (!ctx.analyses.return) return this.call("analyze_item", { evidenceType: "return" });
                 return this.call("compare_items");
             case "COMPARISON":
+                if (ctx.comparison?.visualChecks.some((c) => c.status === "pending")) {
+                    return this.call("verify_product_match");
+                }
                 return this.call("validate_evidence");
             case "VERIFICATION":
                 if ((ctx.comparison?.materialDiscrepancyCount ?? 0) > 0) return this.call("build_claim_pack");

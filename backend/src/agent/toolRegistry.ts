@@ -34,14 +34,6 @@ export const plannerToolSpecs = (): PlannerToolSpec[] =>
             return { name: t.name, description: t.description, parameters: { type: "object", ...schema } };
         });
 
-/** Anthropic tool definitions (legacy planner). */
-export const plannerToolDefinitions = () =>
-    plannerToolSpecs().map((t) => ({
-        name: t.name,
-        description: t.description,
-        input_schema: { ...t.parameters, type: "object" as const },
-    }));
-
 const fail = (code: string, message: string, retryable = false, details?: unknown): ToolResult => ({
     ok: false,
     error: { code, message, retryable, details },

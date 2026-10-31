@@ -2,7 +2,7 @@ import type { AnalysisRecord } from "../agent/schemas";
 import { env } from "../config/env";
 import { MediaEvidence, type MediaDoc, type MediaType } from "../models/MediaEvidence";
 import type { OrderDoc } from "../models/Order";
-import { normalizeCode, type ComparisonResult } from "./comparisonService";
+import type { ComparisonResult } from "./comparisonService";
 import { storage } from "./storageService";
 import { verifyFramesOnDisk } from "./videoProcessingService";
 
@@ -20,11 +20,11 @@ export type EscalationCode =
     | "POSSIBLE_DISCONTINUITY"
     | "ANALYSIS_UNUSABLE"
     | "LOW_CONFIDENCE"
-    | "ORDER_ID_NOT_VISIBLE"
     | "ORDER_ID_MISMATCH"
+    | "EVIDENCE_NOT_SCANNED"
     | "KEY_ATTRIBUTE_UNVERIFIABLE"
+    | "PRODUCT_MATCH_UNVERIFIED"
     | "INSTRUCTION_TEXT_IN_FOOTAGE"
-    | "HIGH_VALUE_ORDER"
     | "WORKFLOW_ERROR";
 
 export interface EscalationReason {
@@ -107,6 +107,31 @@ export const validateEvidence = async (input: ValidationInput): Promise<Evidence
             });
             continue;
         }
+
+        // The label scan, not the footage, is what ties a video to this order.
+        if (!media.capture?.scanId) {
+            checks.push({
+                name: "label_scan",
+                evidenceType: type,
+                status: "fail",
+                detail: "Not uploaded through a scan of the order's label",
+            });
+            reason({
+                code: "EVIDENCE_NOT_SCANNED",
+                blocking: true,
+                evidenceType: type,
+                message: `The ${LABEL[type]} was not uploaded through a scan of the order's shipping label`,
+            });
+            continue;
+        }
+        checks.push({
+            name: "label_scan",
+            evidenceType: type,
+            status: "pass",
+            detail: media.capture.manualEntry
+                ? "Tracking code typed by hand (label could not be scanned)"
+                : `Label scanned (${media.capture.scanMethod})`,
+        });
 
         if (!(await storage().exists(media.storageKey))) {
             checks.push({
@@ -230,14 +255,6 @@ export const validateEvidence = async (input: ValidationInput): Promise<Evidence
     if (input.analyses) validateAnalyses(input, checks, reason);
     if (input.comparison) validateComparison(input.comparison, checks, reason);
 
-    if (order.declaredValue >= env.HIGH_VALUE_THRESHOLD) {
-        reason({
-            code: "HIGH_VALUE_ORDER",
-            blocking: false,
-            message: `Declared value ${order.declaredValue} ${order.currency} is at or above the ${env.HIGH_VALUE_THRESHOLD} review threshold`,
-        });
-    }
-
     const blocking = reasons.some((r) => r.blocking);
     const pending = checks.some((c) => c.status === "pending");
     return {
@@ -252,8 +269,7 @@ export const validateEvidence = async (input: ValidationInput): Promise<Evidence
 };
 
 const validateAnalyses = (input: ValidationInput, checks: ValidationCheck[], reason: (r: EscalationReason) => void) => {
-    const { order, analyses = {}, stage } = input;
-    const expectedIds = new Set([normalizeCode(order.orderId), normalizeCode(order.trackingCode)]);
+    const { analyses = {}, stage } = input;
 
     for (const type of TYPES) {
         const record = analyses[type];
@@ -333,46 +349,6 @@ const validateAnalyses = (input: ValidationInput, checks: ValidationCheck[], rea
                 message: `The ${LABEL[type]} contains text that reads like instructions to the AI; it was ignored and needs human review`,
             });
         }
-
-        // Order association via identifiers visible on labels.
-        const ids = a.visibleIdentifiers.filter((v) => v.kind === "order_id" || v.kind === "tracking_code");
-        const mismatched = ids.filter((v) => !expectedIds.has(normalizeCode(v.text)));
-        if (mismatched.length) {
-            checks.push({
-                name: "order_identifier",
-                evidenceType: type,
-                status: "fail",
-                detail: `Visible identifier(s) ${mismatched.map((m) => `${m.text} (${m.frameIds.join(", ")})`).join("; ")} do not match the order`,
-            });
-            reason({
-                code: "ORDER_ID_MISMATCH",
-                blocking: true,
-                evidenceType: type,
-                message: `The ${LABEL[type]} shows identifier ${mismatched[0].text}, which does not match order ${order.orderId}`,
-            });
-        } else if (ids.length === 0) {
-            checks.push({
-                name: "order_identifier",
-                evidenceType: type,
-                status: env.REQUIRE_VISIBLE_ORDER_ID ? "fail" : "warn",
-                detail: "No order ID or tracking code is legible in the analysed frames",
-            });
-            if (env.REQUIRE_VISIBLE_ORDER_ID) {
-                reason({
-                    code: "ORDER_ID_NOT_VISIBLE",
-                    blocking: true,
-                    evidenceType: type,
-                    message: `The ${LABEL[type]} does not show a legible order ID or tracking code, so it cannot be reliably matched to the order`,
-                });
-            }
-        } else {
-            checks.push({
-                name: "order_identifier",
-                evidenceType: type,
-                status: "pass",
-                detail: `Matches (${ids.map((i) => i.frameIds.join(",")).join("; ")})`,
-            });
-        }
     }
 };
 
@@ -396,6 +372,16 @@ const validateComparison = (
             name: "key_attributes",
             status: "pass",
             detail: "Package contents and quantity were comparable",
+        });
+    }
+    // The written descriptions differ and no look at both videos settled it: a person decides, without a claim.
+    if (comparison.visualChecks.length) {
+        const labels = comparison.visualChecks.map((c) => c.label);
+        checks.push({ name: "product_match", status: "warn", detail: `Not settled: ${labels.join(", ")}` });
+        reason({
+            code: "PRODUCT_MATCH_UNVERIFIED",
+            blocking: false,
+            message: `Could not confirm from the footage whether the product matches: ${labels.join(", ").toLowerCase()}`,
         });
     }
     if (!comparison.meetsThreshold) {

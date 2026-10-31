@@ -1,13 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createContext, type AgentContext } from "../src/agent/agentState";
-import { executeTool, plannerToolDefinitions } from "../src/agent/toolRegistry";
+import { executeTool, plannerToolSpecs } from "../src/agent/toolRegistry";
 import { env, overrideEnv } from "../src/config/env";
 import { AuditLog } from "../src/models/AuditLog";
 import { Claim } from "../src/models/Claim";
 import { Inspection } from "../src/models/Inspection";
 import { setVisionProvider } from "../src/services/vision";
-import { aiError } from "../src/services/vision/anthropicVisionProvider";
 import { DemoVisionProvider } from "../src/services/vision/demoVisionProvider";
+import { aiError } from "../src/services/vision/errors";
 import {
     connectTestDb,
     createMediaFromFile,
@@ -35,13 +35,12 @@ afterEach(() => {
 });
 
 let seq = 0;
-const newContext = async (opts: { scenario?: string; withReturn?: boolean; declaredValue?: number } = {}) => {
+const newContext = async (opts: { scenario?: string; withReturn?: boolean } = {}) => {
     seq++;
     const order = await createOrder({
         orderId: `ORD-TOOL-${seq}`,
         trackingCode: `TRK-TOOL-${seq}`,
         demoScenario: opts.scenario ?? "normal",
-        declaredValue: opts.declaredValue ?? 120,
     });
     await createMediaFromFile(order, "outbound", await makeVideo("normal"), owner.principal.userId);
     if (opts.withReturn !== false)
@@ -61,11 +60,10 @@ const newContext = async (opts: { scenario?: string; withReturn?: boolean; decla
 const run = async (ctx: AgentContext, name: string, args: unknown = {}) => executeTool(ctx, name, args);
 
 describe("tool registry guards", () => {
-    it("exposes planner tools with object schemas and hides track_refund", () => {
-        const defs = plannerToolDefinitions();
-        expect(defs.map((d) => d.name)).not.toContain("track_refund");
-        expect(defs).toHaveLength(9);
-        for (const d of defs) expect(d.input_schema.type).toBe("object");
+    it("exposes the planner tools with object schemas", () => {
+        const defs = plannerToolSpecs();
+        expect(defs).toHaveLength(10);
+        for (const d of defs) expect(d.parameters.type).toBe("object");
     });
 
     it("rejects unknown tools, invalid arguments and out-of-order calls", async () => {
@@ -79,12 +77,6 @@ describe("tool registry guards", () => {
         expect(await run(ctx, "lookup_order", { orderId: "x", shell: "rm -rf /" })).toMatchObject({
             ok: false,
             error: { code: "INVALID_ARGUMENTS" },
-        });
-        expect(
-            await run(ctx, "track_refund", { claimId: "a".repeat(24), requestedCompensation: 1, actualRefund: 0 }),
-        ).toMatchObject({
-            ok: false,
-            error: { code: "NOT_PERMITTED" },
         });
         expect(ctx.state).toBe("RECEIVED");
     });
@@ -113,7 +105,11 @@ describe("tool workflow", () => {
         });
         expect((await run(ctx, "analyze_item", { evidenceType: "outbound" })).ok).toBe(true);
         expect((await run(ctx, "analyze_item", { evidenceType: "return" })).ok).toBe(true);
-        expect(await run(ctx, "compare_items")).toMatchObject({ ok: true, data: { materialDiscrepancyCount: 2 } });
+        expect(await run(ctx, "compare_items")).toMatchObject({ ok: true, data: { materialDiscrepancyCount: 1 } });
+        expect(await run(ctx, "verify_product_match")).toMatchObject({
+            ok: true,
+            data: { materialDiscrepancyCount: 2 },
+        });
         expect(await run(ctx, "validate_evidence")).toMatchObject({
             ok: true,
             data: { stage: "final", blocking: false },
@@ -134,7 +130,7 @@ describe("tool workflow", () => {
         expect(saved?.outboundAnalysis.source).toBe("demo");
         expect(saved?.comparison.findings.length).toBeGreaterThan(0);
         expect(saved?.frameReferences.length).toBeGreaterThan(0);
-        expect(saved?.agentLog.filter((l) => l.kind === "tool_call")).toHaveLength(9);
+        expect(saved?.agentLog.filter((l) => l.kind === "tool_call")).toHaveLength(10);
         expect(await Claim.countDocuments({ inspectionId: ctx.inspection._id })).toBe(1);
         expect(
             await AuditLog.countDocuments({ inspectionId: ctx.inspection.id, actorType: "agent" }),

@@ -57,9 +57,19 @@ const geminiResponse = (text: string | undefined, finishReason: FinishReason = F
     ...extra,
 });
 
+/** Vision requests are streamed; `generateContent` here records each request and supplies its only chunk. */
 const fakeClient = (impl: () => unknown) => {
     const generateContent = vi.fn(async (..._args: unknown[]) => impl());
-    return { client: { models: { generateContent } } as unknown as GeminiModelsClient, generateContent };
+    const generateContentStream = vi.fn(async (...args: unknown[]) => {
+        const chunk = await generateContent(...args);
+        return (async function* () {
+            yield chunk;
+        })();
+    });
+    return {
+        client: { models: { generateContent, generateContentStream } } as unknown as GeminiModelsClient,
+        generateContent,
+    };
 };
 
 describe("GeminiVisionProvider (mocked client)", () => {
@@ -69,7 +79,13 @@ describe("GeminiVisionProvider (mocked client)", () => {
 
         expect(result.analysis.packageContents).toBe("items_present");
         expect(result.model).toBe("gemini-test-model");
-        expect(result.usage).toEqual({ promptTokens: 1200, outputTokens: 300, thoughtsTokens: 150, apiAttempts: 1 });
+        expect(result.usage).toEqual({
+            promptTokens: 1200,
+            outputTokens: 300,
+            thoughtsTokens: 150,
+            apiAttempts: 1,
+            firstChunkMs: expect.any(Number),
+        });
 
         const params = generateContent.mock.calls[0][0] as unknown as {
             model: string;
@@ -81,7 +97,9 @@ describe("GeminiVisionProvider (mocked client)", () => {
         expect(parts.filter((p) => p.inlineData?.mimeType === "image/jpeg")).toHaveLength(2);
         expect(parts[0].text).toBe("Frame RET-01 at t=0.5s");
         expect(params.config.responseMimeType).toBe("application/json");
-        expect(Object.keys(params.config.responseJsonSchema.properties)).toContain("visibleIdentifiers");
+        const fields = Object.keys(params.config.responseJsonSchema.properties);
+        expect(fields).toContain("packageContents");
+        expect(fields).not.toContain("visibleIdentifiers"); // the tracking code is bound by scanning, not read by AI
         expect(params.config.systemInstruction).toMatch(/untrusted data/);
     });
 
@@ -105,6 +123,36 @@ describe("GeminiVisionProvider (mocked client)", () => {
         });
     });
 
+    it("compares both videos in one request, without naming the product", async () => {
+        const answer = {
+            productType: "same",
+            color: "uncertain",
+            reason: "Same module",
+            outboundFrameIds: ["OUT-01"],
+            returnFrameIds: ["RET-01"],
+            suspectedInstructionText: [],
+            overallConfidence: 0.9,
+        };
+        const { client, generateContent } = fakeClient(() => geminiResponse(JSON.stringify(answer)));
+        const result = await new GeminiVisionProvider(client).verifyProductMatch({
+            outboundFrames: [{ frameId: "OUT-01", timestampSec: 0.5, jpeg: Buffer.from([0xff, 0xd8, 0xff]) }],
+            returnFrames: request.frames,
+        });
+
+        expect(result.match).toEqual(answer);
+        expect(result.usage?.promptTokens).toBe(1200);
+        const params = generateContent.mock.calls[0]![0] as {
+            contents: Array<{ parts: Array<{ text?: string; inlineData?: unknown }> }>;
+            config: { responseJsonSchema: { properties: object } };
+        };
+        const parts = params.contents[0]!.parts;
+        const text = parts.flatMap((p) => p.text ?? []).join("\n");
+        expect(parts.filter((p) => p.inlineData)).toHaveLength(3);
+        expect(text).toMatch(/OUTBOUND[\s\S]*Frame OUT-01[\s\S]*RETURN[\s\S]*Frame RET-01[\s\S]*Frame RET-02/);
+        expect(text).not.toMatch(/Headphones/);
+        expect(params.config.responseJsonSchema.properties).toHaveProperty("productType");
+    });
+
     it("treats safety blocks as final and truncation as retryable", async () => {
         const blocked = fakeClient(() => geminiResponse(undefined, FinishReason.SAFETY));
         await expect(new GeminiVisionProvider(blocked.client).analyze(request)).rejects.toMatchObject({
@@ -126,9 +174,9 @@ describe("GeminiVisionProvider (mocked client)", () => {
         });
     });
 
-    it("classifies API errors: persistent 429/503 are final, timeouts and 500 retry, bad key and unknown model do not", async () => {
+    it("classifies API errors: persistent 429/503/504 and timeouts are final, 500 retries, bad key and unknown model do not", async () => {
         const cases: Array<[unknown, RegExp, boolean]> = [
-            // 429/503 are retried with backoff inside the provider; if they persist the error is final.
+            // These are retried with backoff inside the provider; if they persist the error is final.
             [
                 new GenAiApiError({ message: "quota", status: 429 }),
                 /rate limit or quota \(429\) persisted after 3 attempt/,
@@ -139,13 +187,20 @@ describe("GeminiVisionProvider (mocked client)", () => {
                 /service unavailable \(503\) persisted after 3/,
                 false,
             ],
+            [
+                new GenAiApiError({ message: "gateway", status: 504 }),
+                /gateway timeout \(504\) persisted after 3/,
+                false,
+            ],
             [new GenAiApiError({ message: "internal", status: 500 }), /service error/, true],
             [new GenAiApiError({ message: "bad key", status: 403 }), /API key/, false],
             [new GenAiApiError({ message: "no model", status: 404 }), /gemini:models/, false],
+            [new GenAiApiError({ message: "no credit", status: 402 }), /payment required \(402\).*no credit/, false],
+            [new GenAiApiError({ message: "odd", status: 418 }), /Gemini error \(418\): odd/, false],
             [
                 Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }),
-                /timed out/,
-                true,
+                /request timed out persisted after 3/,
+                false,
             ],
             [new TypeError("fetch failed"), /could not reach/, true],
         ];

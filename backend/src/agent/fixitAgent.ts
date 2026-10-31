@@ -22,21 +22,18 @@ import {
 import { trace, withTraceContext } from "./agentTrace";
 import { DeterministicPlanner } from "./planners/deterministicPlanner";
 import { GeminiPlanner } from "./planners/geminiPlanner";
-import { LlmPlanner } from "./planners/llmPlanner";
 import type { Planner, ToolOutcome } from "./planners/types";
 import { executeTool } from "./toolRegistry";
 
-/** The LLM planner for the active provider, or the fixed workflow when the inspection was created for it. */
-const createPlanner = (inspection: InspectionDoc): Planner => {
-    if (inspection.planner !== "llm") return new DeterministicPlanner();
-    return env.activeProvider === "anthropic" ? new LlmPlanner() : new GeminiPlanner();
-};
+/** The Gemini planner, or the fixed workflow when the inspection was created for it. */
+const createPlanner = (inspection: InspectionDoc): Planner =>
+    inspection.planner === "llm" ? new GeminiPlanner() : new DeterministicPlanner();
 
 /** One-glance provenance: demo data, real AI end to end, or a real run that fell back to the fixed workflow. */
 const executionLabelFor = (inspection: InspectionDoc) => {
     if (inspection.analysisMode === "demo") return "DEMO" as const;
     if (inspection.plannerFallback) return "DETERMINISTIC_FALLBACK" as const;
-    return env.activeProvider === "anthropic" ? ("REAL_ANTHROPIC" as const) : ("REAL_GEMINI" as const);
+    return "REAL_GEMINI" as const;
 };
 
 export interface RunOptions {
@@ -326,7 +323,11 @@ const applyGuardrails = async (ctx: AgentContext) => {
 
     const advisory = known.filter((r) => !r.blocking);
     if (advisory.length && !ctx.reviewTaskCreated) {
-        await escalate(ctx, advisory, "Advisory escalation rules apply (for example a high-value order)");
+        await escalate(
+            ctx,
+            advisory,
+            "Advisory escalation rules apply (for example instruction-like text in the footage)",
+        );
     }
 };
 

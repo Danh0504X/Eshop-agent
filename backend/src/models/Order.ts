@@ -1,4 +1,5 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from "mongoose";
+import { SCAN_METHODS } from "./ScanSession";
 
 export const INSPECTION_STATUSES = ["none", "pending", "processing", "needs_review", "completed", "failed"] as const;
 
@@ -17,8 +18,6 @@ const OrderSchema = new Schema(
         },
         expectedQuantity: { type: Number, required: true, min: 1 },
         expectedAccessories: { type: [String], default: [] },
-        declaredValue: { type: Number, required: true, min: 0 },
-        currency: { type: String, default: "USD" },
         /** Personal data: never sent to the AI provider, redacted in exported reports. */
         customer: {
             name: { type: String },
@@ -33,6 +32,15 @@ const OrderSchema = new Schema(
         /** Development-only: selects predefined demo analysis results when DEMO_MODE is on. */
         demoScenario: { type: String },
         createdBy: { type: Schema.Types.ObjectId, ref: "User" },
+        /** How the tracking code was captured when the order was created from a label scan. */
+        trackingScan: {
+            scanId: { type: Schema.Types.ObjectId, ref: "ScanSession" },
+            method: { type: String, enum: SCAN_METHODS },
+            /** True when the code was typed because the label could not be scanned (weaker binding). */
+            manualEntry: { type: Boolean },
+            scannedAt: { type: Date },
+            scannedBy: { type: Schema.Types.ObjectId, ref: "User" },
+        },
     },
     { timestamps: true },
 );

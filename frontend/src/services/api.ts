@@ -1,4 +1,4 @@
-import type { Claim, Health, Inspection, Media, Order, User } from "../types";
+import type { Claim, Health, Inspection, Media, Order, Scan, User } from "../types";
 
 const TOKEN_KEY = "fixit.token";
 
@@ -85,6 +85,10 @@ export const api = {
         request<{ token: string; user: User }>("POST", "/api/auth/login", { email, password }),
     me: () => request<{ user: User }>("GET", "/api/auth/me"),
 
+    /** This UI has no scanner: the tracking code is typed, so the scan is recorded as a manual entry. */
+    scan: (code: string, purpose: "packing" | "return") =>
+        request<{ scan: Scan; order: Order | null }>("POST", "/api/scans", { code, purpose, method: "manual" }),
+
     listOrders: (params: { status?: string; search?: string }) =>
         request<{ orders: Order[] }>("GET", `/api/orders${qs(params)}`),
     getOrder: (orderId: string) => request<{ order: Order }>("GET", `/api/orders/${encodeURIComponent(orderId)}`),
@@ -118,6 +122,4 @@ export const api = {
         request<{ claim: Claim }>("POST", `/api/claims/${id}/mark-submitted`, { externalReference, note }),
     resolveClaim: (id: string, reason: string) =>
         request<{ claim: Claim }>("POST", `/api/claims/${id}/resolve`, { reason }),
-    recordRefund: (id: string, requestedCompensation: number, actualRefund: number, note?: string) =>
-        request<{ claim: Claim }>("POST", `/api/claims/${id}/refund`, { requestedCompensation, actualRefund, note }),
 };

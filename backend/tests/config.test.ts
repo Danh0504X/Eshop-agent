@@ -31,10 +31,8 @@ describe("AI provider configuration", () => {
         expect(activeModels(config)).toEqual({ vision: "vision-model-x", planner: "planner-model-y" });
     });
 
-    it("no longer needs Anthropic credentials for the default provider", () => {
-        const config = loadConfig({ ...base, DEMO_MODE: "false", GEMINI_API_KEY: "k" });
-        expect(config.AI_API_KEY).toBeUndefined();
-        expect(config.aiMode).toBe("real");
+    it("rejects a provider that is no longer supported", () => {
+        expect(() => loadConfig({ ...base, DEMO_MODE: "true", AI_PROVIDER: "anthropic" })).toThrow(/AI_PROVIDER/);
     });
 
     it("rejects time settings where one AI request could exceed a tool or the inspection budget", () => {

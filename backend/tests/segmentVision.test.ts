@@ -63,15 +63,28 @@ describe("normalizeSegmentObservation", () => {
     });
 });
 
+const streamOf = (chunk: unknown) =>
+    (async function* () {
+        yield chunk;
+    })();
+
 describe("Gemini segment inspection (mocked client)", () => {
     it("sends the segment frames, range and question with the segment schema and validates the answer", async () => {
-        const generateContent = vi.fn(async (..._args: unknown[]) => ({
-            candidates: [{ content: { role: "model", parts: [{ text: "x" }] }, finishReason: FinishReason.STOP }],
-            text: JSON.stringify(observation()),
-            modelVersion: "gemini-test",
-            usageMetadata: { promptTokenCount: 800, candidatesTokenCount: 90, thoughtsTokenCount: 40 },
-        }));
-        const provider = new GeminiVisionProvider({ models: { generateContent } } as unknown as GeminiModelsClient);
+        const generateContentStream = vi.fn(async (..._args: unknown[]) =>
+            streamOf({
+                candidates: [
+                    {
+                        content: { role: "model", parts: [{ text: JSON.stringify(observation()) }] },
+                        finishReason: FinishReason.STOP,
+                    },
+                ],
+                modelVersion: "gemini-test",
+                usageMetadata: { promptTokenCount: 800, candidatesTokenCount: 90, thoughtsTokenCount: 40 },
+            }),
+        );
+        const provider = new GeminiVisionProvider({
+            models: { generateContentStream },
+        } as unknown as GeminiModelsClient);
         const result = await provider.inspectSegment({
             evidenceType: "return",
             frames: [{ frameId: "RET-S1-02", timestampSec: 1.75, jpeg: Buffer.from([0xff, 0xd8]) }],
@@ -83,7 +96,7 @@ describe("Gemini segment inspection (mocked client)", () => {
         expect(result.observation.verdict).toBe("confirmed");
         expect(result.usage).toMatchObject({ promptTokens: 800, apiAttempts: 1 });
 
-        const params = generateContent.mock.calls[0][0] as unknown as {
+        const params = generateContentStream.mock.calls[0][0] as unknown as {
             contents: Array<{ parts: Array<{ text?: string }> }>;
             config: { systemInstruction: string; responseJsonSchema: { properties: object } };
         };
@@ -95,11 +108,22 @@ describe("Gemini segment inspection (mocked client)", () => {
     });
 
     it("rejects malformed segment output as a retryable AI error", async () => {
-        const generateContent = vi.fn(async () => ({
-            candidates: [{ content: { role: "model", parts: [] }, finishReason: FinishReason.STOP }],
-            text: JSON.stringify({ ...observation(), verdict: "probably" }),
-        }));
-        const provider = new GeminiVisionProvider({ models: { generateContent } } as unknown as GeminiModelsClient);
+        const generateContentStream = vi.fn(async () =>
+            streamOf({
+                candidates: [
+                    {
+                        content: {
+                            role: "model",
+                            parts: [{ text: JSON.stringify({ ...observation(), verdict: "probably" }) }],
+                        },
+                        finishReason: FinishReason.STOP,
+                    },
+                ],
+            }),
+        );
+        const provider = new GeminiVisionProvider({
+            models: { generateContentStream },
+        } as unknown as GeminiModelsClient);
         await expect(
             provider.inspectSegment({
                 evidenceType: "return",

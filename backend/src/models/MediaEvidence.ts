@@ -1,7 +1,11 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from "mongoose";
+import { SCAN_METHODS } from "./ScanSession";
 
 export const MEDIA_TYPES = ["outbound", "return"] as const;
 export type MediaType = (typeof MEDIA_TYPES)[number];
+/** "recorded" = filmed in the app after the label scan; "file" = an existing file attached (demo only). */
+export const CAPTURE_METHODS = ["recorded", "file"] as const;
+export type CaptureMethod = (typeof CAPTURE_METHODS)[number];
 export const MEDIA_STATUSES = [
     "uploaded",
     "linked",
@@ -38,6 +42,22 @@ const SegmentSchema = new Schema(
         inspectionId: { type: String },
         question: { type: String },
         createdAt: { type: Date, default: Date.now },
+    },
+    { _id: false },
+);
+
+const CaptureSchema = new Schema(
+    {
+        scanId: { type: Schema.Types.ObjectId, ref: "ScanSession", required: true },
+        scanMethod: { type: String, enum: SCAN_METHODS, required: true },
+        /** True when the tracking code was typed because the label could not be scanned (weaker binding). */
+        manualEntry: { type: Boolean, default: false },
+        scannedAt: { type: Date, required: true },
+        scannedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+        captureMethod: { type: String, enum: CAPTURE_METHODS, required: true },
+        /** Reported by the recording device; informational, not trusted for any decision. */
+        recordingStartedAt: { type: Date },
+        recordingEndedAt: { type: Date },
     },
     { _id: false },
 );
@@ -79,6 +99,10 @@ const MediaEvidenceSchema = new Schema(
         supersededBy: { type: Schema.Types.ObjectId, ref: "MediaEvidence" },
         replacementReason: { type: String },
         deletedAt: { type: Date },
+        /** The label scan that bound this video to its order, and how the video was captured. */
+        capture: { type: CaptureSchema },
+        /** The last good AI analysis of this video and what it depended on; see visionService. */
+        analysisCache: { key: String, record: Schema.Types.Mixed },
     },
     { timestamps: true },
 );

@@ -16,6 +16,7 @@ import {
     disconnectTestDb,
     makeVideo,
     type TestUser,
+    useAdvisoryDemoProvider,
 } from "./helpers";
 
 let owner: TestUser;
@@ -128,10 +129,16 @@ describe("POST /api/inspections/:id/retry", () => {
         expect(escalated.status).toBe("needs_review");
         expect(escalated.reviewTask.status).toBe("open");
 
+        const scan = await request(app)
+            .post("/api/scans")
+            .set(auth(employee))
+            .send({ code: order.trackingCode, purpose: "return", method: "hand_scanner" });
         const upload = await request(app)
             .post(`/api/orders/${order.orderId}/media`)
             .set(auth(employee))
             .field("type", "return")
+            .field("scanId", scan.body.data.scan.id)
+            .field("captureMethod", "file")
             .attach("file", await makeVideo("normal"), { filename: "return.mp4", contentType: "video/mp4" });
         expect(upload.status).toBe(201);
 
@@ -157,11 +164,11 @@ describe("POST /api/inspections/:id/retry", () => {
             .set(auth(owner));
         expect(completed.status).toBe(409);
 
-        // High-value mismatch: needs_review with a pending draft claim.
-        const hv = await orderWithEvidence({ scenario: "mismatch" });
-        await Order.updateOne({ _id: hv._id }, { $set: { declaredValue: 5000 } });
-        const b = await request(app).post(`/api/orders/${hv.orderId}/inspect`).set(auth(owner));
-        const result = await poll(b.body.data.inspection._id);
+        // Mismatch plus an advisory reason: needs_review with a pending draft claim.
+        const flagged = await orderWithEvidence({ scenario: "mismatch" });
+        useAdvisoryDemoProvider();
+        const b = await request(app).post(`/api/orders/${flagged.orderId}/inspect`).set(auth(owner));
+        const result = await poll(b.body.data.inspection._id).finally(() => setVisionProvider(undefined));
         expect(result.status).toBe("needs_review");
         expect((await Claim.findById(result.claimId))?.status).toBe("pending_approval");
         const blocked = await request(app).post(`/api/inspections/${result._id}/retry`).set(auth(owner));

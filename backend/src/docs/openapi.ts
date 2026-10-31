@@ -65,6 +65,7 @@ export const openApiDocument = {
     tags: [
         { name: "System" },
         { name: "Auth" },
+        { name: "Scans" },
         { name: "Orders" },
         { name: "Evidence" },
         { name: "Inspections" },
@@ -114,6 +115,29 @@ export const openApiDocument = {
                 },
             },
         },
+        "/api/scans": {
+            post: {
+                tags: ["Scans"],
+                summary:
+                    "Record a shipping-label scan (packing: create the order or add its video; return: finds the order)",
+                description:
+                    "Every order and evidence video is bound to a scan of its label instead of the AI reading the code " +
+                    "from footage. A scan expires after SCAN_SESSION_TTL_MINUTES. A packing scan of a code that already has " +
+                    "an order returns that order (to add or replace its packing video); it cannot create a second order.",
+                requestBody: jsonBody(ref("CreateScan")),
+                responses: {
+                    ...ok(
+                        "Scan recorded",
+                        {
+                            type: "object",
+                            properties: { scan: ref("Scan"), order: { ...ref("Order"), nullable: true } },
+                        },
+                        "201",
+                    ),
+                    ...errors(400, 401, 403, 404, 409),
+                },
+            },
+        },
         "/api/orders": {
             get: {
                 tags: ["Orders"],
@@ -142,7 +166,7 @@ export const openApiDocument = {
             },
             post: {
                 tags: ["Orders"],
-                summary: "Create an order",
+                summary: "Create an order from a packing scan (tracking code from the scan, order ID generated)",
                 requestBody: jsonBody(ref("CreateOrder")),
                 responses: {
                     ...ok("Created", { type: "object", properties: { order: ref("Order") } }, "201"),
@@ -179,10 +203,15 @@ export const openApiDocument = {
             },
             post: {
                 tags: ["Evidence"],
-                summary: "Upload an outbound or return evidence video",
+                summary: "Upload an outbound or return evidence video, bound to a scan of the order's label",
                 description:
-                    "Accepted: mp4, mov, webm, mkv, avi (content is verified, not just the extension). Existing evidence is never " +
-                    "overwritten silently: replacing requires replaceExisting=true and a replacementReason; the old file is kept as superseded.",
+                    "Accepted: mp4, mov, webm, mkv, avi (content is verified, not just the extension). Every video needs an unused " +
+                    "scan (POST /api/scans) of this order's tracking code made by the uploader: a packing scan for outbound, a " +
+                    "return scan for return videos. captureMethod=recorded means filmed in the app after the scan (the check " +
+                    "that such a video is not longer than the time since the scan is temporarily disabled). " +
+                    "captureMethod=file attaches an existing file and is only " +
+                    "accepted when ALLOW_FILE_EVIDENCE is on (demo). Existing evidence is never overwritten silently: replacing " +
+                    "requires replaceExisting=true and a replacementReason; the old file is kept as superseded.",
                 parameters: [pathParam("orderId")],
                 requestBody: {
                     required: true,
@@ -190,10 +219,14 @@ export const openApiDocument = {
                         "multipart/form-data": {
                             schema: {
                                 type: "object",
-                                required: ["file", "type"],
+                                required: ["file", "type", "scanId", "captureMethod"],
                                 properties: {
                                     file: { type: "string", format: "binary" },
                                     type: { type: "string", enum: ["outbound", "return"] },
+                                    scanId: id,
+                                    captureMethod: { type: "string", enum: ["recorded", "file"] },
+                                    recordingStartedAt: { type: "string", format: "date-time" },
+                                    recordingEndedAt: { type: "string", format: "date-time" },
                                     replaceExisting: { type: "boolean" },
                                     replacementReason: { type: "string" },
                                 },
@@ -402,28 +435,6 @@ export const openApiDocument = {
                 },
             },
         },
-        "/api/claims/{claimId}/refund": {
-            post: {
-                tags: ["Claims"],
-                summary: "Record requested compensation and actual refund (owner only); flags shortfalls",
-                description:
-                    "Amounts are entered by a person. No payment is verified (paymentVerified is always false).",
-                parameters: [pathParam("claimId", id)],
-                requestBody: jsonBody({
-                    type: "object",
-                    required: ["requestedCompensation", "actualRefund"],
-                    properties: {
-                        requestedCompensation: { type: "number", minimum: 0 },
-                        actualRefund: { type: "number", minimum: 0 },
-                        note: { type: "string" },
-                    },
-                }),
-                responses: {
-                    ...ok("Recorded", { type: "object", properties: { claim: ref("Claim") } }),
-                    ...errors(400, 401, 403, 404),
-                },
-            },
-        },
     },
     components: {
         securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
@@ -445,6 +456,11 @@ export const openApiDocument = {
                     analysisMode: { type: "string", enum: ["real", "demo"] },
                     aiModel: { type: "string", nullable: true },
                     planner: { type: "string" },
+                    allowFileEvidence: {
+                        type: "boolean",
+                        description:
+                            "true: evidence may be attached as a file (demo); false: it must be recorded in the app",
+                    },
                 },
             },
             Principal: {
@@ -458,12 +474,51 @@ export const openApiDocument = {
                     warehouseIds: { type: "array", items: { type: "string" } },
                 },
             },
-            CreateOrder: {
+            CreateScan: {
                 type: "object",
-                required: ["orderId", "trackingCode", "warehouseId", "product", "expectedQuantity", "declaredValue"],
+                required: ["code", "purpose", "method"],
                 properties: {
-                    orderId: { type: "string", example: "ORD-100" },
-                    trackingCode: { type: "string", example: "TRK-100" },
+                    code: { type: "string", pattern: "^[A-Za-z0-9_.-]{1,64}$", example: "GHN12345678" },
+                    purpose: { type: "string", enum: ["packing", "return"] },
+                    method: {
+                        type: "string",
+                        enum: ["camera", "image_file", "hand_scanner", "manual"],
+                        description: "manual = typed because the label could not be scanned",
+                    },
+                },
+            },
+            Scan: {
+                type: "object",
+                properties: {
+                    id,
+                    code: { type: "string" },
+                    purpose: { type: "string", enum: ["packing", "return"] },
+                    method: { type: "string" },
+                    manualEntry: { type: "boolean" },
+                    orderId: { type: "string", nullable: true },
+                    scannedAt: { type: "string", format: "date-time" },
+                    expiresAt: { type: "string", format: "date-time" },
+                },
+            },
+            CreateOrder: {
+                allOf: [
+                    ref("OrderDetails"),
+                    {
+                        type: "object",
+                        required: ["scanId"],
+                        properties: {
+                            scanId: {
+                                ...id,
+                                description: "A packing scan made by the caller; supplies the tracking code",
+                            },
+                        },
+                    },
+                ],
+            },
+            OrderDetails: {
+                type: "object",
+                required: ["warehouseId", "product", "expectedQuantity"],
+                properties: {
                     warehouseId: { type: "string", example: "wh-hcm" },
                     product: {
                         type: "object",
@@ -478,8 +533,6 @@ export const openApiDocument = {
                     },
                     expectedQuantity: { type: "integer", minimum: 1 },
                     expectedAccessories: { type: "array", items: { type: "string" } },
-                    declaredValue: { type: "number", minimum: 0 },
-                    currency: { type: "string", example: "USD" },
                     customer: {
                         type: "object",
                         description: "Personal data: never sent to the AI provider; excluded from reports.",
@@ -493,11 +546,21 @@ export const openApiDocument = {
             },
             Order: {
                 allOf: [
-                    ref("CreateOrder"),
+                    ref("OrderDetails"),
                     {
                         type: "object",
                         properties: {
                             _id: { type: "string" },
+                            orderId: { type: "string", example: "ORD-261030-7KQ2" },
+                            trackingCode: { type: "string", example: "GHN12345678" },
+                            trackingScan: {
+                                type: "object",
+                                properties: {
+                                    method: { type: "string" },
+                                    manualEntry: { type: "boolean" },
+                                    scannedAt: { type: "string", format: "date-time" },
+                                },
+                            },
                             shopId: { type: "string" },
                             inspectionStatus: { type: "string" },
                             latestInspectionId: { type: "string" },
@@ -519,6 +582,18 @@ export const openApiDocument = {
                     sizeBytes: { type: "integer" },
                     sha256: { type: "string" },
                     metadata: { type: "object" },
+                    capture: {
+                        type: "object",
+                        properties: {
+                            scanId: { type: "string" },
+                            scanMethod: { type: "string", enum: ["camera", "image_file", "hand_scanner", "manual"] },
+                            manualEntry: { type: "boolean" },
+                            scannedAt: { type: "string", format: "date-time" },
+                            captureMethod: { type: "string", enum: ["recorded", "file"] },
+                            recordingStartedAt: { type: "string", format: "date-time" },
+                            recordingEndedAt: { type: "string", format: "date-time" },
+                        },
+                    },
                     frames: {
                         type: "array",
                         items: {
@@ -604,9 +679,6 @@ export const openApiDocument = {
                     aiGenerated: { type: "boolean" },
                     analysisMode: { type: "string" },
                     redaction: { type: "object" },
-                    requestedCompensation: { type: "number" },
-                    actualRefund: { type: "number" },
-                    refund: { type: "object" },
                     approval: { type: "object" },
                     history: { type: "array", items: { type: "object" } },
                     reportUrl: { type: "string", nullable: true },

@@ -1,15 +1,22 @@
+import crypto from "node:crypto";
+import { z } from "zod";
+import { buildVisionUserText, VISION_SYSTEM_PROMPT } from "../agent/prompts";
 import {
     normalizeAnalysis,
+    normalizeProductMatch,
     normalizeSegmentObservation,
+    ProductMatchSchema,
     SegmentObservationSchema,
     VisionAnalysisSchema,
     type AnalysisRecord,
+    type ProductMatchRecord,
     type SegmentInspectionRecord,
 } from "../agent/schemas";
-import { env } from "../config/env";
-import type { MediaDoc } from "../models/MediaEvidence";
+import { activeModels, env } from "../config/env";
+import { MediaEvidence, type MediaDoc } from "../models/MediaEvidence";
 import type { OrderDoc } from "../models/Order";
-import { ApiError } from "../utils/errors";
+import { ApiError, errorMessage } from "../utils/errors";
+import { logger } from "../utils/logger";
 import { aiError } from "./vision/errors";
 import { getVisionProvider } from "./vision";
 import type { VisionFrame } from "./vision/types";
@@ -18,11 +25,14 @@ import { isBaselineFrame } from "./videoProcessingService";
 
 type Frame = MediaDoc["frames"][number];
 
-/** Pick up to `max` frames spread across the video, preferring frames that passed the quality check. */
+/** With fewer clear frames than this the model gets all of them: dark or blurry frames beat too few frames. */
+const MIN_CLEAR_FRAMES = 3;
+
+/** Pick up to `max` frames spread across the video, leaving out frames that failed the quality check. */
 export const selectFrames = (frames: Frame[], max: number): Frame[] => {
-    if (frames.length <= max) return [...frames];
-    const good = frames.filter((f) => f.quality === "ok");
-    const pool = good.length >= max ? good : frames;
+    const clear = frames.filter((f) => f.quality === "ok");
+    const pool = clear.length >= MIN_CLEAR_FRAMES ? clear : frames;
+    if (pool.length <= max) return [...pool];
     const step = pool.length / max;
     const picked = Array.from({ length: max }, (_, i) => pool[Math.floor(i * step)]);
     return picked.sort((a, b) => a.index - b.index);
@@ -83,8 +93,6 @@ export const analyzeEvidence = async (
             provider.source === "demo"
                 ? {
                       scenario: order.demoScenario ?? undefined,
-                      orderId: order.orderId,
-                      trackingCode: order.trackingCode,
                       color: product.color ?? undefined,
                       model: product.model ?? undefined,
                   }
@@ -108,6 +116,125 @@ export const analyzeEvidence = async (
         model: response.model,
         framesAnalyzed: frames.map((f) => ({ frameId: f.frameId, timestampSec: f.timestampSec })),
         analyzedAt: new Date().toISOString(),
+        result,
+        validationNotes: notes,
+        ...(response.usage ? { usage: response.usage } : {}),
+    };
+};
+
+const ANALYSIS_CONTRACT = JSON.stringify([VISION_SYSTEM_PROMPT, z.toJSONSchema(VisionAnalysisSchema)]);
+
+/** Everything an analysis depends on, so changing the prompt, schema, model, frames or checklist runs it again. */
+const analysisKey = (media: MediaDoc, order: OrderDoc): string => {
+    const frames = selectFrames(media.frames.filter(isBaselineFrame), env.MAX_FRAMES_PER_ANALYSIS);
+    const product = order.product!;
+    return crypto
+        .createHash("sha256")
+        .update(
+            JSON.stringify({
+                contract: ANALYSIS_CONTRACT,
+                provider: getVisionProvider().source,
+                model: activeModels(env)?.vision,
+                thinking: env.GEMINI_THINKING_LEVEL ?? null,
+                checklist: buildVisionUserText({
+                    evidenceType: media.type,
+                    productName: product.name,
+                    productDescription: product.description || undefined,
+                    expectedQuantity: order.expectedQuantity,
+                    expectedAccessories: order.expectedAccessories,
+                    frameCount: frames.length,
+                }),
+                frames: frames.map((f) => [f.frameId, f.timestampSec, f.sharpness]),
+            }),
+        )
+        .digest("hex");
+};
+
+/** The stored analysis of this video, if it is still valid for this order and configuration. */
+export const findReusableAnalysis = (media: MediaDoc, order: OrderDoc): AnalysisRecord | null => {
+    const cache = media.analysisCache as { key?: string; record?: AnalysisRecord } | undefined;
+    if (!env.AI_ANALYSIS_CACHE || !cache?.record || cache.key !== analysisKey(media, order)) return null;
+    return { ...cache.record, reused: true };
+};
+
+/**
+ * Keep a good AI analysis for later runs. A weak one is not kept: running the inspection again is then a real
+ * second attempt. Failing to store it must not fail the analysis.
+ */
+export const rememberAnalysis = async (media: MediaDoc, order: OrderDoc, record: AnalysisRecord): Promise<void> => {
+    const { overallConfidence, imageConditions } = record.result;
+    const usable = imageConditions.lighting !== "unusable" && imageConditions.focus !== "unusable";
+    if (record.source !== "ai" || overallConfidence < env.CONFIDENCE_THRESHOLD || !usable) return;
+    try {
+        await MediaEvidence.updateOne(
+            { _id: media._id },
+            { $set: { analysisCache: { key: analysisKey(media, order), record } } },
+        );
+    } catch (error) {
+        logger.warn("Could not store the analysis for reuse", { mediaId: media.id, error: errorMessage(error) });
+    }
+};
+
+/** The analysed frames most cited for the product itself, so the check looks where the product was seen. */
+const framesShowingProduct = (media: MediaDoc, record: AnalysisRecord): Frame[] => {
+    const { items, totalItemCount, packageContentsFrameIds } = record.result;
+    const item = items[0];
+    const citations = new Map<string, number>();
+    const cited = [
+        packageContentsFrameIds,
+        totalItemCount.frameIds,
+        ...(item
+            ? [item.productType, item.color, item.model, item.brand, item.quantity, item.condition].map(
+                  (o) => o.frameIds,
+              )
+            : []),
+    ];
+    for (const id of cited.flat()) citations.set(id, (citations.get(id) ?? 0) + 1);
+    const analysed = new Set(record.framesAnalyzed.map((f) => f.frameId));
+    return media.frames
+        .filter((f) => analysed.has(f.frameId))
+        .sort((a, b) => (citations.get(b.frameId) ?? 0) - (citations.get(a.frameId) ?? 0))
+        .slice(0, env.MAX_FRAMES_PER_MATCH_CHECK)
+        .sort((a, b) => a.timestampSec - b.timestampSec);
+};
+
+/** Show the vision provider frames of both videos in one request and ask whether the product is the same. */
+export const verifyProductMatch = async (
+    media: { outbound: MediaDoc; return: MediaDoc },
+    analyses: { outbound: AnalysisRecord; return: AnalysisRecord },
+    order: OrderDoc,
+    options: { deadlineMs?: number } = {},
+): Promise<ProductMatchRecord> => {
+    const provider = getVisionProvider();
+    if (!provider.verifyProductMatch) {
+        throw aiError("The configured vision provider does not support comparing both videos", false);
+    }
+    const outboundFrames = await loadFrames(framesShowingProduct(media.outbound, analyses.outbound));
+    const returnFrames = await loadFrames(framesShowingProduct(media.return, analyses.return));
+    const response = await provider.verifyProductMatch({
+        outboundFrames,
+        returnFrames,
+        deadlineMs: options.deadlineMs,
+        demoContext: provider.source === "demo" ? { scenario: order.demoScenario ?? undefined } : undefined,
+    });
+
+    const parsed = ProductMatchSchema.safeParse(response.match);
+    if (!parsed.success) {
+        throw aiError(`Product match output failed schema validation: ${parsed.error.issues[0]?.message}`, true);
+    }
+    const { result, notes } = normalizeProductMatch(
+        parsed.data,
+        { outbound: outboundFrames.map((f) => f.frameId), return: returnFrames.map((f) => f.frameId) },
+        env.CONFIDENCE_THRESHOLD,
+    );
+    return {
+        source: provider.source,
+        model: response.model,
+        framesAnalyzed: [...outboundFrames, ...returnFrames].map((f) => ({
+            frameId: f.frameId,
+            timestampSec: f.timestampSec,
+        })),
+        verifiedAt: new Date().toISOString(),
         result,
         validationNotes: notes,
         ...(response.usage ? { usage: response.usage } : {}),

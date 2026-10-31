@@ -69,13 +69,6 @@ export const VisionAnalysisSchema = z.object({
             }),
         ),
     }),
-    visibleIdentifiers: z.array(
-        z.object({
-            text: z.string(),
-            kind: z.enum(["order_id", "tracking_code", "sku", "barcode", "other"]),
-            frameIds: z.array(z.string()),
-        }),
-    ),
     imageConditions: z.object({
         lighting: z.enum(["good", "poor", "unusable"]),
         focus: z.enum(["sharp", "blurry", "unusable"]),
@@ -108,6 +101,8 @@ export interface AnalysisRecord {
     validationNotes: string[];
     /** Provider-reported token usage, for cost tracking. */
     usage?: { promptTokens: number; outputTokens: number; thoughtsTokens: number; apiAttempts: number };
+    /** True when this result came from an earlier run on the same evidence, without a new AI request. */
+    reused?: boolean;
 }
 
 type Condition = VisionAnalysis["items"][number]["condition"];
@@ -190,10 +185,6 @@ export const normalizeAnalysis = (
                 frameIds: filterIds(o.frameIds, `packagingCondition.observations[${i}]`),
             })),
         },
-        visibleIdentifiers: raw.visibleIdentifiers.map((v, i) => ({
-            ...v,
-            frameIds: filterIds(v.frameIds, `visibleIdentifiers[${i}]`),
-        })),
         privacy: {
             framesWithPeople: raw.privacy.framesWithPeople.filter((id) => known.has(id)),
             framesWithPersonalData: raw.privacy.framesWithPersonalData.filter((id) => known.has(id)),
@@ -201,6 +192,65 @@ export const normalizeAnalysis = (
         overallConfidence: Math.min(1, Math.max(0, Number.isFinite(raw.overallConfidence) ? raw.overallConfidence : 0)),
     };
     return { result, notes };
+};
+
+/** Answer to "is this the same product?" after seeing frames of both recordings in one request. */
+const MatchVerdict = z.enum(["same", "different", "uncertain"]);
+export type MatchVerdict = z.infer<typeof MatchVerdict>;
+
+export const ProductMatchSchema = z.object({
+    productType: MatchVerdict,
+    color: MatchVerdict,
+    reason: z.string(),
+    outboundFrameIds: z.array(z.string()),
+    returnFrameIds: z.array(z.string()),
+    suspectedInstructionText: z.array(z.string()),
+    overallConfidence: z.number(),
+});
+export type ProductMatch = z.infer<typeof ProductMatchSchema>;
+
+/** What the inspection stores for a product match check. */
+export interface ProductMatchRecord {
+    source: "ai" | "demo";
+    model: string | null;
+    framesAnalyzed: Array<{ frameId: string; timestampSec: number }>;
+    verifiedAt: string;
+    result: ProductMatch;
+    validationNotes: string[];
+    usage?: { promptTokens: number; outputTokens: number; thoughtsTokens: number; apiAttempts: number };
+}
+
+/**
+ * A verdict only counts when it is grounded in frames of both recordings, the model is confident and the footage
+ * contains no text addressed to the AI. Anything else becomes "uncertain", which sends the case to a person.
+ */
+export const normalizeProductMatch = (
+    raw: ProductMatch,
+    sent: { outbound: string[]; return: string[] },
+    threshold: number,
+): { result: ProductMatch; notes: string[] } => {
+    const notes: string[] = [];
+    const outboundFrameIds = raw.outboundFrameIds.filter((id) => sent.outbound.includes(id));
+    const returnFrameIds = raw.returnFrameIds.filter((id) => sent.return.includes(id));
+    const overallConfidence = Math.min(
+        1,
+        Math.max(0, Number.isFinite(raw.overallConfidence) ? raw.overallConfidence : 0),
+    );
+    if (!outboundFrameIds.length || !returnFrameIds.length) notes.push("No valid frame cited for one of the videos");
+    if (overallConfidence < threshold) notes.push(`Confidence ${overallConfidence.toFixed(2)} is below ${threshold}`);
+    if (raw.suspectedInstructionText.length) notes.push("Footage contains text addressed to the AI");
+    const settle = (verdict: MatchVerdict): MatchVerdict => (notes.length ? "uncertain" : verdict);
+    return {
+        result: {
+            ...raw,
+            productType: settle(raw.productType),
+            color: settle(raw.color),
+            outboundFrameIds,
+            returnFrameIds,
+            overallConfidence,
+        },
+        notes,
+    };
 };
 
 /**

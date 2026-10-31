@@ -26,7 +26,7 @@ const EnvSchema = z
         JWT_EXPIRES_IN: z.string().default("8h"),
 
         DEMO_MODE: bool(false),
-        AI_PROVIDER: z.enum(["gemini", "anthropic", "demo"]).default("gemini"),
+        AI_PROVIDER: z.enum(["gemini", "demo"]).default("gemini"),
         GEMINI_API_KEY: z.string().optional(),
         // Configurable because Gemini model availability changes; run `npm run gemini:models` to list yours.
         GEMINI_VISION_MODEL: z.string().default("gemini-3.8-flash"),
@@ -36,18 +36,16 @@ const EnvSchema = z
             (v) => (v === "" ? undefined : v),
             z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
         ),
-        // Transport-level backoff for 429/503 only (full jitter, honours Google's RetryInfo).
+        // Transport-level backoff for 429/503/504 and timeouts (full jitter, honours Google's RetryInfo).
+        // Reuse a good analysis of an unchanged video when an inspection runs again (see visionService).
+        AI_ANALYSIS_CACHE: bool(true),
         AI_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(6).default(3),
         AI_RETRY_BASE_DELAY_MS: z.coerce.number().int().min(0).default(2_000),
         AI_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(0).default(30_000),
-        // Legacy Anthropic settings, kept until the Gemini migration is verified end to end.
-        AI_API_KEY: z.string().optional(),
-        AI_MODEL: z.string().default("claude-opus-5-5"),
-        AI_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("high"),
         // Per HTTP attempt; shortened automatically to fit the remaining tool/inspection budget.
         AI_TIMEOUT_MS: z.coerce.number().int().positive().default(180_000),
-        AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
-        AI_REFUSAL_FALLBACK: bool(true),
+        // Streamed vision requests: give up on an attempt and retry if Gemini sends nothing for this long.
+        AI_FIRST_CHUNK_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
         AGENT_PLANNER: z.enum(["llm", "deterministic"]).default("llm"),
         AGENT_MAX_ITERATIONS: z.coerce.number().int().min(3).max(50).default(20),
         AGENT_TIMEOUT_MS: z.coerce
@@ -65,12 +63,16 @@ const EnvSchema = z
 
         UPLOAD_DIR: z.string().default("./uploads"),
         MAX_UPLOAD_SIZE_MB: z.coerce.number().positive().default(200),
+        // Demo convenience: allow attaching an existing video file instead of recording it in the app after the scan.
+        ALLOW_FILE_EVIDENCE: bool(false),
         MAX_VIDEO_DURATION_SEC: z.coerce.number().positive().default(600),
         MIN_VIDEO_DURATION_SEC: z.coerce.number().nonnegative().default(2),
         FRAMES_PER_VIDEO: z.coerce.number().int().min(2).max(30).default(8),
         // Targeted re-inspection: one segment may span at most this many seconds and yield at most this many frames.
         MAX_SEGMENT_SECONDS: z.coerce.number().positive().max(60).default(10),
         MAX_FRAMES_PER_SEGMENT: z.coerce.number().int().min(1).max(12).default(6),
+        // Frames of each video sent when both are compared in one request (verify_product_match).
+        MAX_FRAMES_PER_MATCH_CHECK: z.coerce.number().int().min(1).max(12).default(5),
         // Budgets for adaptive re-inspection, per inspection run. Separate from transport and tool-failure retries.
         MAX_SEGMENT_INSPECTIONS: z.coerce.number().int().min(0).max(10).default(3),
         MAX_REANALYSES_PER_VIDEO: z.coerce.number().int().min(0).max(3).default(1),
@@ -82,8 +84,8 @@ const EnvSchema = z
         FFMPEG_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
 
         CONFIDENCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.7),
-        HIGH_VALUE_THRESHOLD: z.coerce.number().nonnegative().default(500),
-        REQUIRE_VISIBLE_ORDER_ID: bool(true),
+        // A label scan authorises creating the order or uploading its video for this long.
+        SCAN_SESSION_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(30),
         MIN_FRAME_BRIGHTNESS: z.coerce.number().min(0).max(255).default(40),
         MIN_FRAME_SHARPNESS: z.coerce.number().nonnegative().default(15),
         MAX_BAD_FRAME_RATIO: z.coerce.number().min(0).max(1).default(0.5),
@@ -104,14 +106,6 @@ const EnvSchema = z
                 path: ["GEMINI_API_KEY"],
                 message:
                     "GEMINI_API_KEY is required when AI_PROVIDER=gemini and DEMO_MODE=false. Create a key at https://aistudio.google.com, or set DEMO_MODE=true to run with predefined (non-AI) demo results.",
-            });
-        }
-        if (!env.DEMO_MODE && env.AI_PROVIDER === "anthropic" && !env.AI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
-            ctx.addIssue({
-                code: "custom",
-                path: ["AI_API_KEY"],
-                message:
-                    "AI_API_KEY is required when AI_PROVIDER=anthropic and DEMO_MODE=false. Set AI_API_KEY, or set DEMO_MODE=true to run with predefined (non-AI) demo results.",
             });
         }
         if (env.AI_TIMEOUT_MS >= env.AGENT_TOOL_TIMEOUT_MS) {
@@ -144,14 +138,13 @@ export type AppConfig = z.infer<typeof EnvSchema> & {
     /** Effective analysis mode: "demo" whenever DEMO_MODE is on or AI_PROVIDER=demo. */
     aiMode: "real" | "demo";
     /** Which real provider is active (null in demo mode). */
-    activeProvider: "gemini" | "anthropic" | null;
+    activeProvider: "gemini" | null;
 };
 
 /** Model names in use, for health checks and logs. Never includes credentials. */
 export const activeModels = (config: AppConfig): { vision: string; planner: string } | null => {
     if (config.activeProvider === "gemini")
         return { vision: config.GEMINI_VISION_MODEL, planner: config.GEMINI_PLANNER_MODEL };
-    if (config.activeProvider === "anthropic") return { vision: config.AI_MODEL, planner: config.AI_MODEL };
     return null;
 };
 
@@ -165,11 +158,10 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     const demo = values.DEMO_MODE || values.AI_PROVIDER === "demo";
     return {
         ...values,
-        AI_API_KEY: values.AI_API_KEY ?? source.ANTHROPIC_API_KEY,
         IS_PRODUCTION: values.NODE_ENV === "production",
         uploadDirAbs: path.resolve(values.UPLOAD_DIR),
         aiMode: demo ? "demo" : "real",
-        activeProvider: demo ? null : (values.AI_PROVIDER as "gemini" | "anthropic"),
+        activeProvider: demo ? null : "gemini",
     };
 }
 

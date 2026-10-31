@@ -2,12 +2,13 @@ import type { RequestHandler } from "express";
 import { StatusCodes } from "http-status-codes";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { principalOf } from "../middleware/authMiddleware";
-import { createOrder, findOrder, listOrders, serializeOrder } from "../services/orderService";
+import { findOrder, listOrders, serializeOrder } from "../services/orderService";
+import { createOrderFromScan } from "../services/scanService";
 import { createOrderSchema, listOrdersQuery } from "../validators/schemas";
 
 export const create: RequestHandler = asyncHandler(async (request, response) => {
     const principal = principalOf(request);
-    const order = await createOrder(principal, createOrderSchema.parse(request.body));
+    const order = await createOrderFromScan(principal, createOrderSchema.parse(request.body));
     response
         .status(StatusCodes.CREATED)
         .json({ status: "success", message: "Order created", data: { order: serializeOrder(order, principal) } });

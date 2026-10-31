@@ -17,10 +17,11 @@ export interface ReviewTaskInput {
 const defaultAction = (reasons: EscalationReason[]): string => {
     const codes = new Set(reasons.map((r) => r.code));
     if (codes.has("EVIDENCE_MISSING")) return "Upload the missing evidence video, then retry the inspection.";
-    if (codes.has("POOR_VIDEO_QUALITY") || codes.has("ORDER_ID_NOT_VISIBLE"))
+    if (codes.has("EVIDENCE_NOT_SCANNED"))
+        return "Scan the order's label and upload the video again from the app, then retry the inspection.";
+    if (codes.has("POOR_VIDEO_QUALITY"))
         return "Review the footage; if it is unusable, upload a clearer replacement recording and retry the inspection.";
     if (codes.has("ORDER_ID_MISMATCH")) return "Confirm the evidence belongs to this order; replace it if it does not.";
-    if (codes.has("HIGH_VALUE_ORDER")) return "Review the draft claim and evidence before approving or rejecting it.";
     return "Review the evidence and findings and decide how to proceed.";
 };
 

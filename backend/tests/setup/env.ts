@@ -9,3 +9,4 @@ process.env.DEMO_MODE = "true";
 process.env.AI_PROVIDER = "demo";
 process.env.UPLOAD_DIR = path.join(os.tmpdir(), `fixit-test-uploads-${process.pid}`);
 process.env.MAX_UPLOAD_SIZE_MB = "20";
+process.env.ALLOW_FILE_EVIDENCE = "true";

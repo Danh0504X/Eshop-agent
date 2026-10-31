@@ -13,6 +13,7 @@ beforeAll(async () => {
 afterAll(disconnectTestDb);
 
 const REQUIRED = [
+    "post /api/scans",
     "post /api/orders",
     "get /api/orders",
     "get /api/orders/{orderId}",
@@ -24,7 +25,6 @@ const REQUIRED = [
     "post /api/claims/{claimId}/approve",
     "post /api/claims/{claimId}/reject",
     "get /api/claims/{claimId}/report",
-    "post /api/claims/{claimId}/refund",
     "get /api/health",
 ];
 

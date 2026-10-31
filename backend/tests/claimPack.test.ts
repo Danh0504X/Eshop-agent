@@ -5,7 +5,7 @@ import { Claim } from "../src/models/Claim";
 import { Inspection } from "../src/models/Inspection";
 import { MediaEvidence } from "../src/models/MediaEvidence";
 import { Order, type OrderDoc } from "../src/models/Order";
-import { buildClaimPack, trackRefund } from "../src/services/claimService";
+import { buildClaimPack } from "../src/services/claimService";
 import { compareAnalyses } from "../src/services/comparisonService";
 import { validateEvidence } from "../src/services/evidenceValidationService";
 import { buildReportModel, renderReportPdf } from "../src/services/reportService";
@@ -25,12 +25,10 @@ import {
 import { demoPair } from "./fixtures";
 
 let owner: TestUser;
-let employee: TestUser;
 
 beforeAll(async () => {
     await connectTestDb();
     owner = await createUser({ role: "owner", shopId: "shop-a" });
-    employee = await createUser({ role: "employee", shopId: "shop-a", warehouseIds: ["wh-1"] });
 });
 afterAll(disconnectTestDb);
 
@@ -44,11 +42,7 @@ const setup = async (scenario: DemoScenario, overrides: Record<string, unknown> 
     await extractFrames(out.id);
     await extractFrames(ret.id);
     const order = (await Order.findById(created._id)) as OrderDoc;
-    const { outbound, returned } = await demoPair(scenario, {
-        orderId,
-        trackingCode: `TRK-${orderId}`,
-        expectedQuantity: order.expectedQuantity,
-    });
+    const { outbound, returned } = await demoPair(scenario, { expectedQuantity: order.expectedQuantity });
     const comparison = compareAnalyses(outbound, returned, order, 0.7);
     const validation = await validateEvidence({
         order,
@@ -101,9 +95,7 @@ describe("report and claim pack", () => {
         const ctx = await setup("mismatch", {
             customer: { name: "Le Van C", phone: "0900 111 222", address: "99 Hai Ba Trung Street, Hanoi" },
         });
-        const sensitive = (
-            await demoPair("sensitive_info", { orderId: ctx.order.orderId, trackingCode: ctx.order.trackingCode })
-        ).returned;
+        const sensitive = (await demoPair("sensitive_info")).returned;
         ctx.analyses.return.result.packagingCondition = sensitive.result.packagingCondition;
         // A frame cited by the findings is flagged as showing a person.
         ctx.analyses.return.result.privacy = { framesWithPeople: ["RET-05"], framesWithPersonalData: [] };
@@ -128,7 +120,7 @@ describe("report and claim pack", () => {
         const pdf = await renderReportPdf(model, { compress: false });
         expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
         const raw = pdf.toString("latin1");
-        expect(raw).toContain(hex("120")); // positive control: declared value is rendered
+        expect(raw).toContain(hex("100")); // positive control: the product model (WH-100) is rendered
         for (const secret of ["0900", "0912", "Hai Ba", "Le Van"]) expect(raw).not.toContain(hex(secret));
     });
 
@@ -139,7 +131,7 @@ describe("report and claim pack", () => {
         expect(claim.status).toBe("pending_approval");
         expect(claim.aiGenerated).toBe(true);
         expect(claim.findings.map((f: { category: string }) => f.category)).toEqual(
-            expect.arrayContaining(["model_mismatch", "color_mismatch"]),
+            expect.arrayContaining(["model_mismatch"]),
         );
         expect(claim.evidenceReferences.length).toBeGreaterThan(0);
         expect(await storage().exists(claim.reportStorageKey!)).toBe(true);
@@ -161,39 +153,12 @@ describe("report and claim pack", () => {
             message: expect.stringMatching(/no claim is needed/),
         });
 
-        const mismatchedId = await setup("mismatched_identifier");
-        expect(mismatchedId.validation.blocking).toBe(true);
+        const lowConfidence = await setup("low_confidence");
+        expect(lowConfidence.validation.blocking).toBe(true);
         await expect(
-            buildClaimPack({ ...mismatchedId, principal: owner.principal, actorType: "agent" }),
+            buildClaimPack({ ...lowConfidence, principal: owner.principal, actorType: "agent" }),
         ).rejects.toMatchObject({
             message: expect.stringMatching(/blocking issues/),
-        });
-    });
-});
-
-describe("trackRefund", () => {
-    it("case 9: flags an actual refund lower than the requested compensation without claiming payment verification", async () => {
-        const ctx = await setup("missing_item");
-        const claim = await buildClaimPack({ ...ctx, principal: owner.principal, actorType: "agent" });
-
-        const updated = await trackRefund(owner.principal, claim.id, {
-            requestedCompensation: 120,
-            actualRefund: 80.5,
-        });
-        expect(updated.refund).toMatchObject({ discrepancyAmount: 39.5, flagged: true, paymentVerified: false });
-        expect(await AuditLog.countDocuments({ action: "claim.refund_recorded", claimId: claim.id })).toBe(1);
-
-        const matched = await trackRefund(owner.principal, claim.id, { requestedCompensation: 120, actualRefund: 120 });
-        expect(matched.refund?.flagged).toBe(false);
-    });
-
-    it("only lets owners record refund amounts", async () => {
-        const ctx = await setup("missing_item");
-        const claim = await buildClaimPack({ ...ctx, principal: owner.principal, actorType: "agent" });
-        await expect(
-            trackRefund(employee.principal, claim.id, { requestedCompensation: 1, actualRefund: 0 }),
-        ).rejects.toMatchObject({
-            code: "FORBIDDEN",
         });
     });
 });

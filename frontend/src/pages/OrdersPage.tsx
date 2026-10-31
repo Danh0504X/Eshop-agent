@@ -15,6 +15,7 @@ const OrderInfo = ({ order }: { order: Order }) => (
                 <td>Order / tracking</td>
                 <td>
                     {order.orderId} / {order.trackingCode}
+                    {order.trackingScan?.manualEntry && <span className="muted small"> (typed by hand)</span>}
                 </td>
             </tr>
             <tr>
@@ -33,12 +34,6 @@ const OrderInfo = ({ order }: { order: Order }) => (
                 <td>Expected</td>
                 <td>
                     {order.expectedQuantity} item(s); accessories: {order.expectedAccessories.join(", ") || "none"}
-                </td>
-            </tr>
-            <tr>
-                <td>Declared value</td>
-                <td>
-                    {order.declaredValue} {order.currency}
                 </td>
             </tr>
             {order.customer && (

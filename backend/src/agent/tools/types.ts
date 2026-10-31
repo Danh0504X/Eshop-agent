@@ -14,7 +14,7 @@ export interface ToolDefinition<A = unknown> {
     name: ToolName;
     description: string;
     schema: z.ZodType<A>;
-    /** false for tools only an authorized user may trigger (e.g. track_refund); the agent never sees them. */
+    /** false for tools only an authorized user may trigger; the agent never sees them. */
     plannerVisible: boolean;
     /** Retry bucket key so retries are counted per target (e.g. per evidence type). */
     attemptKey?: (args: A) => string;

@@ -68,7 +68,7 @@ export const summarizeToolResult = (tool: string, data: Data): { headline: strin
             return {
                 headline: `order found: ${data.product?.name ?? "?"}${data.product?.model ? ` ${data.product.model}` : ""}${data.product?.color ? ` ${data.product.color}` : ""}, qty ${data.expectedQuantity}`,
                 details: [
-                    `accessories: ${(data.expectedAccessories ?? []).join(", ") || "none"} | declared value ${data.declaredValue} ${data.currency ?? ""}`,
+                    `accessories: ${(data.expectedAccessories ?? []).join(", ") || "none"}`,
                     `evidence linked: outbound=${data.outboundEvidenceLinked ? "yes" : "NO"} return=${data.returnEvidenceLinked ? "yes" : "NO"}`,
                 ],
             };
@@ -96,12 +96,13 @@ export const summarizeToolResult = (tool: string, data: Data): { headline: strin
         case "analyze_item": {
             const item = data.items?.[0];
             return {
-                headline: `${data.evidenceType} ${data.reanalysis ? `RE-ANALYSIS with ${data.segmentFramesIncluded?.length ?? 0} segment frame(s)` : "analysis"} (${data.source === "demo" ? "DEMO DATA" : "AI"}): contents=${data.packageContents}, confidence ${Number(data.overallConfidence ?? 0).toFixed(2)}`,
+                headline: `${data.evidenceType} ${data.reanalysis ? `RE-ANALYSIS with ${data.segmentFramesIncluded?.length ?? 0} segment frame(s)` : "analysis"} (${data.source === "demo" ? "DEMO DATA" : data.reused ? "AI, REUSED from an earlier run, no AI call" : "AI"}): contents=${data.packageContents}, confidence ${Number(data.overallConfidence ?? 0).toFixed(2)}`,
                 details: [
+                    `frames sent: ${(data.framesAnalyzed ?? []).length} of ${data.framesExtracted ?? "?"} extracted (dark or blurry frames are left out)`,
                     `product ${obs(item?.productType)} | qty ${obs(data.totalItemCount)} | colour ${obs(item?.color)} | model ${obs(item?.model)}`,
                     `product condition: ${describeCondition(item?.condition)}`,
                     `accessories: ${(data.accessories ?? []).map((a: Data) => `${a.name}=${a.status}`).join(", ") || "none listed"} | packaging: ${data.packagingCondition?.overall ?? "?"}`,
-                    `identifiers seen: ${(data.visibleIdentifierKinds ?? []).map((v: Data) => v.kind).join(", ") || "none"} | image: ${data.imageConditions?.lighting} light, ${data.imageConditions?.focus}, ${data.imageConditions?.continuity}`,
+                    `image: ${data.imageConditions?.lighting} light, ${data.imageConditions?.focus}, ${data.imageConditions?.continuity}`,
                     ...(data.instructionLikeTextFound
                         ? [
                               `WARNING: ${data.instructionLikeTextFound} instruction-like text(s) found in footage (ignored)`,
@@ -123,12 +124,29 @@ export const summarizeToolResult = (tool: string, data: Data): { headline: strin
                                 ? ` (${f.evidence.map((e: Data) => `${e.frameId}@${e.timestampSec?.toFixed?.(1) ?? "?"}s`).join(", ")})`
                                 : ""),
                     ),
+                    ...(data.visualChecks ?? []).map(
+                        (c: Data) => `to check on both videos: ${c.label} "${c.outboundValue}" vs "${c.returnValue}"`,
+                    ),
                     ...(data.unverifiedAttributes?.length
                         ? [`not verifiable: ${data.unverifiedAttributes.join(", ")}`]
                         : []),
                 ],
             };
         }
+        case "verify_product_match":
+            return {
+                headline: `product match (${data.source === "demo" ? "DEMO DATA" : "AI"}): ${(data.checks ?? []).map((c: Data) => `${c.label}=${String(c.verdict).toUpperCase()}`).join(", ")}, confidence ${Number(data.overallConfidence ?? 0).toFixed(2)}`,
+                details: [
+                    ...(data.checks ?? []).map(
+                        (c: Data) => `${c.label}: "${c.outboundValue}" vs "${c.returnValue}" -> ${c.verdict}`,
+                    ),
+                    `frames sent: ${(data.framesAnalyzed ?? []).map((f: Data) => f.frameId).join(" ")}`,
+                    `product seen in: ${[...(data.outboundFrameIds ?? []), ...(data.returnFrameIds ?? [])].join(" ") || "none"}`,
+                    `why: ${data.reason}`,
+                    ...(data.validationNotes ?? []).map((n: string) => `not relied on: ${n}`),
+                    `now ${data.materialDiscrepancyCount} material discrepancy(ies)`,
+                ],
+            };
         case "inspect_video_segment": {
             const budget = data.budgetRemaining ?? {};
             return {

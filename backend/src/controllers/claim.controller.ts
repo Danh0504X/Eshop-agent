@@ -11,7 +11,7 @@ import {
     resolveClaim,
     serializeClaim,
 } from "../services/claimReviewService";
-import { getClaimForPrincipal, trackRefund } from "../services/claimService";
+import { getClaimForPrincipal } from "../services/claimService";
 import { storage } from "../services/storageService";
 import { notFound } from "../utils/errors";
 import {
@@ -20,7 +20,6 @@ import {
     markSubmittedSchema,
     objectIdParam,
     reasonSchema,
-    refundSchema,
 } from "../validators/schemas";
 
 const claimId = (params: Record<string, unknown>) => objectIdParam.parse(params.claimId);
@@ -89,16 +88,4 @@ export const resolve: RequestHandler = asyncHandler(async (request, response) =>
     response
         .status(StatusCodes.OK)
         .json({ status: "success", message: "Claim resolved", data: { claim: serializeClaim(claim) } });
-});
-
-export const refund: RequestHandler = asyncHandler(async (request, response) => {
-    const id = claimId(request.params);
-    const claim = await trackRefund(principalOf(request), id, refundSchema.parse(request.body));
-    response.status(StatusCodes.OK).json({
-        status: "success",
-        message: claim.refund?.flagged
-            ? "Refund recorded. The actual refund is lower than the requested compensation."
-            : "Refund recorded.",
-        data: { claim: serializeClaim(claim) },
-    });
 });

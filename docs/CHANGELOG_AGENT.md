@@ -168,3 +168,256 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
 - **Tests executed:** typecheck OK; `npm test` 161 passed, 2 skipped; backend and frontend build OK. New tests (scripted Gemini planner + demo vision, no network): full loop ending in a HIGH `product_condition_change` claim citing `RET-S1-02/03`; claim refused right after new evidence; planner stopped by the AI budget; duplicate vs different segments; segment and re-analysis budgets; re-analysis rules; baseline frames intact and verification invalidated.
 - **Real API test:** not run (free-tier quota).
 - **Suggested Git commit:** `feat(agent): bounded adaptive re-inspection loop with budgets`
+
+---
+
+## Scan-first redesign B1 — Remove monetary fields and refund tracking
+
+- **Files changed:** `backend/src/models/Order.ts`, `backend/src/models/Claim.ts`, `backend/src/validators/schemas.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/src/services/evidenceValidationService.ts`, `backend/src/services/reviewService.ts`, `backend/src/services/claimService.ts`, `backend/src/services/claimReviewService.ts`, `backend/src/services/reportService.ts`, `backend/src/controllers/claim.controller.ts`, `backend/src/routes/claimRoute.ts`, `backend/src/docs/openapi.ts`, `backend/src/agent/agentState.ts`, `backend/src/agent/agentTrace.ts`, `backend/src/agent/fixitAgent.ts`, `backend/src/agent/prompts.ts`, `backend/src/agent/tools/index.ts`, `backend/src/agent/tools/types.ts`, `backend/src/agent/tools/lookupOrder.ts`, `backend/src/agent/tools/notifyHuman.ts`, `backend/scripts/seed.ts`, tests (`helpers`, `agentTools`, `claimApi`, `claimPack`, `evidenceValidation`, `fixitAgent`, `foundation`, `geminiPlanner`, `inspectionApi`, `openapi`)
+- **Files removed:** `backend/src/agent/tools/trackRefund.ts`
+- **Previous behavior:** orders required `declaredValue` (and `currency`); a value at or above `HIGH_VALUE_THRESHOLD` (500, compared without regard to currency) added the advisory `HIGH_VALUE_ORDER`, so the inspection ended in `needs_review`. Owners recorded requested and actual refund amounts with `POST /api/claims/:id/refund` (tool `track_refund`, hidden from the planner), which flagged shortfalls.
+- **New behavior:**
+  - The inspection compares the product only. Orders have no `declaredValue` or `currency`; `POST /api/orders` silently drops those keys if a client still sends them.
+  - `HIGH_VALUE_ORDER` and `HIGH_VALUE_THRESHOLD` are gone. The remaining advisory escalation is `INSTRUCTION_TEXT_IN_FOOTAGE`; the planner prompt now says to call `notify_human` when final verification reports advisory reasons.
+  - Refund tracking is removed: no endpoint, no tool, no `currency` / `requestedCompensation` / `actualRefund` / `refund` on claims. The tool registry has 9 tools, all planner-visible.
+  - `lookup_order`, the console trace and the PDF report no longer show a declared value.
+- **Compatibility impact:** existing MongoDB documents keep the old fields; Mongoose ignores them (`npm run seed -- --reset` gives clean demo data). `HIGH_VALUE_THRESHOLD` in an existing `.env` is ignored. The old `frontend/` refund form now receives 404 until its minimal update. Required scenario #9 (refund shortfall) is intentionally dropped.
+- **Tests executed:** typecheck OK; `npm test` 158 passed, 2 skipped (161 before: the 3 refund tests were removed). Tests that relied on high-value orders now use `useAdvisoryDemoProvider()` (demo vision plus instruction-like text) and still cover claim + advisory review task, closing the advisory review on a claim decision, and refusing a retry while a draft claim is undecided. The PDF privacy test's positive control is now the product model. Build OK.
+- **Real API test:** not applicable (no AI behaviour changed).
+- **Suggested Git commit:** `refactor(orders): remove declared value, high-value rule and refund tracking`
+
+---
+
+## Scan-first redesign B2 — Stop reading the tracking code from the video
+
+- **Files changed:** `backend/src/agent/schemas.ts`, `backend/src/agent/tools/analyzeItem.ts`, `backend/src/agent/tools/validateEvidence.ts`, `backend/src/agent/agentTrace.ts`, `backend/src/services/evidenceValidationService.ts`, `backend/src/services/reviewService.ts`, `backend/src/services/visionService.ts`, `backend/src/services/vision/types.ts`, `backend/src/services/vision/demoVisionProvider.ts`, `backend/src/config/env.ts`, `backend/.env.example`, tests (`fixtures`, `claimPack`, `evidenceValidation`, `fixitAgent`, `geminiVision`, `vision`)
+- **Previous behavior:** the vision model transcribed order IDs and tracking codes from labels (`visibleIdentifiers`). Final verification blocked with `ORDER_ID_NOT_VISIBLE` when a video showed no legible code (`REQUIRE_VISIBLE_ORDER_ID=true`) and with `ORDER_ID_MISMATCH` when it showed a different one.
+- **New behavior:**
+  - `visibleIdentifiers` is removed from the vision schema (and therefore from the JSON schema sent to Gemini), from the planner's analysis summary and from the console trace. The model no longer reads order identifiers.
+  - `ORDER_ID_NOT_VISIBLE` and `REQUIRE_VISIBLE_ORDER_ID` are gone. `ORDER_ID_MISMATCH` remains only as the backend check that a linked video was recorded for this order and shop.
+  - Demo scenarios `missing_identifier` and `mismatched_identifier` are removed; the demo context no longer carries order identifiers.
+  - Binding a video to its order moves to the scan step (B3/B4).
+- **Compatibility impact:** stored analyses that still contain `visibleIdentifiers` are ignored by the code. `REQUIRE_VISIBLE_ORDER_ID` in an existing `.env` is ignored. Privacy flags (`framesWithPeople`, `framesWithPersonalData`) are unchanged, so PDF frame blurring still works.
+- **Tests executed:** typecheck OK; `npm test` 156 passed, 2 skipped (158 before: the two "no visible order identifier" tests were removed). Both "case 8" tests now link a video recorded for another order and expect a blocking `ORDER_ID_MISMATCH`; the agent version also asserts that no AI call is made. The claim-pack refusal test uses `low_confidence` as its blocking case. The Gemini request test asserts the schema no longer contains `visibleIdentifiers`. Build OK.
+- **Real API test:** not run.
+- **Suggested Git commit:** `refactor(vision): stop reading order identifiers from footage`
+
+---
+
+## Scan-first redesign B3 — Label scans and orders created from them
+
+- **Files changed:** `backend/src/models/Order.ts`, `backend/src/models/index.ts`, `backend/src/validators/schemas.ts`, `backend/src/services/orderService.ts`, `backend/src/controllers/order.controller.ts`, `backend/src/routes/api.ts`, `backend/src/docs/openapi.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/tests/foundation.test.ts`, `backend/tests/openapi.test.ts`
+- **Files added:** `backend/src/models/ScanSession.ts`, `backend/src/services/scanService.ts`, `backend/src/controllers/scan.controller.ts`, `backend/src/routes/scanRoute.ts`, `backend/tests/scanFlow.test.ts`
+- **Previous behavior:** `POST /api/orders` took a client-chosen `orderId` and a typed `trackingCode`; nothing tied the order to a physical label, and the same tracking code could be used by several orders.
+- **New behavior:**
+  - `POST /api/scans {code, purpose: packing|return, method: camera|image_file|hand_scanner|manual}` records a label scan with a server timestamp and an expiry (`SCAN_SESSION_TTL_MINUTES`, default 30). The code must look like a tracking code (letters, digits, `.`, `_`, `-`; max 64), so a scanned URL or text QR is rejected.
+    - **packing:** refused with 409 if the shop already has an order for that code; the response names the order only when the caller may open it.
+    - **return:** finds the order within the caller's shop and warehouses (404 other shop, 403 other warehouse) and returns it (customer data only to owners).
+  - `POST /api/orders` now requires `scanId` (a packing scan made by the caller, unexpired) and no longer accepts `orderId` or `trackingCode`. The tracking code comes from the scan; the order ID is generated as `ORD-YYMMDD-XXXX` (server local date, characters without 0/O/1/I/L, regenerated on the rare collision). One tracking code belongs to one order per shop.
+  - The scan is claimed atomically before the order is written, so one scan never creates two orders; if creation fails (for example a warehouse the caller is not assigned to) the scan is released and can be used again.
+  - Orders store `trackingScan {scanId, method, manualEntry, scannedAt, scannedBy}`; `manualEntry` is true when the code was typed because the label could not be scanned. It is a label only and does not change the inspection result.
+  - Scans are audited (`scan.record`); `order.create` audits now include the tracking code and scan method.
+- **Compatibility impact:** the old `frontend/` order form (which sends `orderId`/`trackingCode` without a scan) now gets 400 until its minimal update. Seed and existing orders are unchanged (no `trackingScan`). The tracking-code uniqueness rule is enforced by the service, not by a unique index, so existing databases need no index migration.
+- **Tests executed:** typecheck OK; `npm test` 166 passed, 2 skipped (10 new in `scanFlow.test.ts`: order ID format; packing scan; rejected codes, purposes, methods and anonymous calls; existing code with and without visibility; return-scan lookup and scope; scanned tracking code and generated ID despite client-supplied identifiers; manual entry; concurrent use of one scan; wrong purpose, expired, someone else's and unknown scans; code taken after the scan and scan released after a failed creation). `foundation` order tests now create orders from scans. Build OK.
+- **Real API test:** not applicable (no AI calls).
+- **Suggested Git commit:** `feat(orders): create orders from label scans with generated order IDs`
+
+---
+
+## Scan-first redesign B4 — Every evidence video is bound to a label scan
+
+- **Files changed:** `backend/src/models/MediaEvidence.ts`, `backend/src/models/ScanSession.ts`, `backend/src/validators/schemas.ts`, `backend/src/services/mediaService.ts`, `backend/src/services/scanService.ts`, `backend/src/services/evidenceValidationService.ts`, `backend/src/services/reviewService.ts`, `backend/src/services/ffmpegService.ts`, `backend/src/controllers/scan.controller.ts`, `backend/src/routes/api.ts`, `backend/src/docs/openapi.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/scripts/seed.ts`, tests (`setup/env`, `helpers`, `evidenceValidation`, `fixitAgent`, `foundation`, `inspectionApi`, `scanFlow`)
+- **Files added:** `backend/tests/evidenceCapture.test.ts`
+- **Previous behavior:** any authorised user could upload a video file for an order; nothing recorded when or how it was captured, and the AI used to read the label to tie it to the order (removed in B2).
+- **New behavior:**
+  - `POST /api/orders/:orderId/media` requires `scanId` and `captureMethod` (`recorded` | `file`), optionally `recordingStartedAt` / `recordingEndedAt`. The scan must be the uploader's own, unexpired, of this order's tracking code, of the matching kind (packing scan for outbound, return scan for return), and unused for a video; it is claimed atomically and released again if the upload fails.
+  - `captureMethod=file` (attach an existing file) is accepted only when the new `ALLOW_FILE_EVIDENCE` is true (default false; `.env.example` sets true for local demos). A check that a `captureMethod=recorded` video is not longer than the time since its scan (plus 5 s) is implemented but **temporarily commented out** in `uploadEvidence`, so videos recorded earlier can still be uploaded while the workflow is tried out; the comment explains how to re-enable it.
+  - Videos store `capture {scanId, scanMethod, manualEntry, scannedAt, scannedBy, captureMethod, recordingStartedAt?, recordingEndedAt?}`.
+  - Evidence validation adds the blocking `EVIDENCE_NOT_SCANNED` for a linked video without a capture record, so such an inspection is escalated before any AI call; the review task asks to scan the label and upload the video again.
+  - A packing scan of a tracking code that already has an order now returns that order instead of 409, so its packing video can be added (for example after a failed upload) or replaced. It still cannot create a second order.
+  - `probeVideo` falls back to packet timestamps when the container has no duration, as in WebM files written live by a browser `MediaRecorder`. Without this, in-app recordings would fail both the duration check and frame extraction.
+  - `GET /api/health` reports `allowFileEvidence`.
+  - Seed videos are bound to hand-scanner scans and attached as files; `--reset` also removes scan sessions.
+- **Compatibility impact:** videos uploaded before this change have no `capture` and now block inspections with `EVIDENCE_NOT_SCANNED`; run `npm run seed -- --reset` for clean demo data. With `ALLOW_FILE_EVIDENCE` unset, file uploads are refused (set it to true for the old `frontend/` and local demos). The old `frontend/` upload form gets 400 until its minimal update.
+- **Tests executed:** typecheck OK; `npm test` 175 passed, 3 skipped (9 new: 7 active in `evidenceCapture.test.ts` covering capture recording, required fields, wrong kind / other label / other user / reused scan, manual entry, file uploads disabled without using up the scan, a long recorded video accepted while the timing check is disabled, and a live WebM without a duration header that uploads and extracts 8 frames; plus `EVIDENCE_NOT_SCANNED` in evidence validation and in the agent, which makes no AI call). The timing-check test is kept as `it.skip` for when the check is re-enabled. Existing upload tests now scan first; test helpers bind fixture videos to a scan unless `scanned: false`. Build OK.
+- **Real API test:** not applicable (no AI calls).
+- **Suggested Git commit:** `feat(evidence): require a label scan for every evidence upload`
+
+---
+
+## Scan-first redesign F0 — Minimal update of the old demo frontend
+
+- **Files changed:** `frontend/src/types.ts`, `frontend/src/services/api.ts`, `frontend/src/components/CreateOrderForm.tsx`, `frontend/src/components/EvidencePanel.tsx`, `frontend/src/components/ClaimPanel.tsx`, `frontend/src/pages/ClaimsPage.tsx`, `frontend/src/pages/OrdersPage.tsx`
+- **Previous behavior:** after B1–B4 the old `frontend/` could no longer create orders (it sent `orderId`, `trackingCode`, `declaredValue`) or upload videos (no scan), and its refund form called a removed endpoint.
+- **New behavior:**
+  - The order form has no order ID, declared value or currency. Submitting records a packing scan of the typed tracking code (`method: manual`) and creates the order from it; the backend generates the order ID. A code that already has an order is reported instead of creating a duplicate.
+  - The evidence form asks for the tracking code printed on the label, records a packing or return scan for it (`manual`) and uploads the file with `captureMethod: file` (requires `ALLOW_FILE_EVIDENCE=true`).
+  - Evidence rows show how each video was bound (label scanned or typed by hand; recorded in the app or attached file); the order view marks tracking codes typed by hand.
+  - Refund tracking (claim panel and claims list column) and the declared value row are removed.
+- **Compatibility impact:** this UI has no scanner, so every order and video it creates is marked as a manual entry. The new `web/` frontend replaces it for the scan-first workflow.
+- **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `frontend/` OK. The request sequences it uses (manual packing scan → create order; packing/return scan → upload with `captureMethod=file`) are covered by the backend API tests. Not clicked through in a browser.
+- **Suggested Git commit:** `fix(frontend): adapt the demo UI to scan-bound orders and evidence`
+
+---
+
+## Scan-first redesign W1 — New `web/` frontend: app shell
+
+- **Files added:** `web/package.json`, `web/package-lock.json`, `web/tsconfig.json`, `web/vite.config.ts`, `web/index.html`, `web/.prettierrc`, `web/src/main.tsx`, `web/src/App.tsx`, `web/src/styles.css`, `web/src/lib/{api,auth,health,types}.ts(x)`, `web/src/components/{AppShell,ModeChips,icons,ui}.tsx`, `web/src/pages/{LoginPage,PlaceholderPage}.tsx`
+- **What it is:** a separate, production-style UI for the scan-first workflow (the old `frontend/` stays as the demo UI). React 19 + TypeScript + Vite like `frontend/`, plus `react-router` for real URLs. Vietnamese UI, plain CSS with design tokens, inline SVG icons, no UI library. Dev server on port 5174, proxying `/api` to the backend.
+- **Behaviour in this step:**
+  - Login (Vietnamese errors; dev-only quick-fill for the seeded accounts), token stored under its own key, automatic return to login when the backend rejects the token.
+  - Responsive shell: on screens of 900 px and wider, a sidebar with the two main actions (Thêm đơn, Nhận hàng hoàn) and navigation (Đơn hàng, Khiếu nại); below that, a top bar and a bottom tab bar for phones.
+  - Always-visible mode chips from `GET /api/health`: "Dữ liệu demo" or "AI thật · Gemini", and "Tải file từ máy (demo)" when `ALLOW_FILE_EVIDENCE` is on; a banner when the backend or its database is unreachable.
+  - Routes for orders, new order, order detail, returns and claims exist; their pages are placeholders replaced in the next steps. No agent logs or raw data are shown anywhere.
+- **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `web/` OK. Ran the app against a throwaway in-memory MongoDB seeded with the demo data (backend on 4100 with `DEMO_MODE=true`) and drove it in headless Chrome: login page, real login through the form, orders and returns routes and the 404 page at 1280x800 and 390x844, with no console errors.
+- **Suggested Git commit:** `feat(web): scaffold the new frontend with login and responsive app shell`
+
+---
+
+## Scan-first redesign W2 — Label scanner and video recorder in `web/`
+
+- **Files added:** `web/src/lib/barcode.ts`, `web/src/lib/camera.ts`, `web/src/components/LabelScanner.tsx`, `web/src/components/VideoCapture.tsx`, `web/src/pages/DeviceCheckPage.tsx`
+- **Files changed:** `web/package.json`, `web/package-lock.json`, `web/vite.config.ts`, `web/src/App.tsx`, `web/src/components/icons.tsx`, `web/src/styles.css`
+- **New behavior:**
+  - `LabelScanner` reads the tracking code with the camera (rear camera when available) or, when `ALLOW_FILE_EVIDENCE` is on, from an uploaded photo of the label. Decoding uses `barcode-detector` (ZXing-C++ WebAssembly) for Code 128/39/93, ITF, EAN-13, QR and Data Matrix; the `.wasm` is bundled and served by the app, never fetched from a CDN. A camera read is accepted after the same code appears in two consecutive frames; a label with several codes asks the person to pick the tracking number; a value that cannot be a tracking code (for example a URL in a QR code) is rejected with a hint. "Nhãn bị hỏng? Nhập tay" accepts a typed code (same format rule) and reports it as a manual entry. No hand-scanner support (not needed).
+  - `VideoCapture` records with the browser camera through `MediaRecorder` (VP8 WebM, or MP4 on Safari), shows a timer, stops automatically at 600 s, and lets the person review, re-record or confirm; recordings shorter than 2 s cannot be confirmed. When `ALLOW_FILE_EVIDENCE` is on it also accepts a video file from the computer. Files are created with the plain MIME type (`video/webm`) the backend accepts.
+  - Camera errors (permission denied, no camera, camera in use, non-HTTPS page) get Vietnamese messages and a retry.
+  - Development page `/dev/devices` (only routed by the dev server) tries both components without contacting the backend and can download the recording.
+  - `npm run dev:https` serves the dev server over HTTPS on the local network (`@vitejs/plugin-basic-ssl`), because phones only allow the camera on HTTPS.
+- **Problems found while testing and fixed:** headless Chrome reported `video/webm;codecs=vp9` as supported but produced empty recordings, so VP8 is preferred and an empty recording or a recorder error is reported instead of being handed over; the camera frame is height-capped and centered on wide screens so the controls stay visible.
+- **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `web/` OK. Drove the dev page in headless Chrome against a throwaway in-memory database, with a fake camera fed by a generated Code 128 label: camera scan → `GHN12345678`; uploaded label → same code; label with two barcodes → choice list; URL QR → rejected; manual entry validated. Recorded 3 s with the fake camera: 43 KB VP8 WebM whose container has no duration (`duration=N/A`), which the backend's `probeVideo` measured as 3.2 s and `POST /api/orders/ORD-007/media` accepted with `captureMethod=recorded`. No console errors and no requests outside the app. `npm run dev:https` answered over HTTPS. Not tried on a physical phone or webcam.
+- **Suggested Git commit:** `feat(web): add camera label scanner and in-browser video recorder`
+
+---
+
+## Scan-first redesign W3 — "Thêm đơn" (add order) screen in `web/`
+
+- **Files added:** `web/src/pages/NewOrderPage.tsx`
+- **Files changed:** `web/src/lib/api.ts`, `web/src/lib/types.ts`, `web/src/App.tsx`, `web/src/components/LabelScanner.tsx`, `web/src/components/icons.tsx`, `web/src/pages/DeviceCheckPage.tsx`, `web/src/styles.css`
+- **New behavior:**
+  - `/orders/new` is a three-step wizard: (1) scan the shipping label (camera, uploaded photo in demo mode, or flagged manual entry) and record a packing scan; (2) order details with the tracking code filled in and locked ("Quét lại" to rescan), warehouse, product name, quantity, model, colour, SKU, description, accessories as chips, optional customer data; (3) record the packing video (or attach a file in demo mode). The order is created and the video uploaded only at the end, with an upload progress bar; the backend generates the order ID. A done screen links to the order or starts another one.
+  - A packing scan of a code that already has an order shows that order: "Mở đơn", and when it has no packing video yet (for example a failed upload), "Quay video đóng gói cho đơn này" goes straight to step 3 for it.
+  - If the upload fails after the order was created, the screen says so and offers to rescan the label, which leads back to adding the packing video to that order.
+  - API client: `api.scan`, `api.createOrder`, `api.uploadEvidence` (XMLHttpRequest for upload progress). Shared `ScanMethod` type in `lib/types`.
+- **Tests executed:** `npm run typecheck`, Prettier and `npm run build` in `web/` OK. Drove the screen in headless Chrome against a throwaway in-memory database: camera scan of a generated Code 128 label → locked code → details with two accessories and a customer name → 3 s recording → order `ORD-261030-JH52` created; the API showed the scanned tracking code, all details, one packing video (`recorded`, `video/webm`, scan `camera`) and no customer data for the employee. Rescanning the same label showed the existing order without the add-video action. A photo of the label of an existing order without video led to adding a packing video from a file (`file` / `image_file`). Phone layout checked at 390x844. No console errors. One earlier run timed out waiting for the confirm button after recording; two later runs passed without warnings and the cause was not identified.
+- **Suggested Git commit:** `feat(web): add the scan-first "Thêm đơn" wizard`
+
+---
+
+## Scan-first redesign W3 fix — Clear validation errors in "Thêm đơn"
+
+- **Files changed:** `web/src/lib/api.ts`, `web/src/pages/NewOrderPage.tsx`
+- **Problem:** creating an order could fail at the very end with only "Thông tin chưa hợp lệ. Request validation failed". The backend's `warehouseId` accepts only letters without diacritics, digits and `. _ -`, and owner accounts type the warehouse by hand, so values like `Kho Hà Nội` were rejected after the video had already been recorded. The UI ignored the field details the backend returned.
+- **New behavior:** step 2 checks the warehouse, product name and quantity before moving on to the video; the warehouse field explains the allowed characters; validation errors from the backend are shown per field in Vietnamese.
+- **Tests executed:** `npm run typecheck` and Prettier in `web/` OK. In headless Chrome against a throwaway database, as the owner: `Kho Hà Nội` is stopped at step 2; `kho1` creates the order and uploads the video; a simulated backend validation error shows the field messages. The exact value that caused the reported failure was not confirmed.
+- **Suggested Git commit:** `fix(web): explain validation errors and check the warehouse before recording`
+
+---
+
+## Scan-first redesign W4 — Orders list, order detail and "Nhận hàng hoàn" in `web/`
+
+- **Files added:** `web/src/pages/OrdersPage.tsx`, `web/src/pages/OrderDetailPage.tsx`, `web/src/pages/ReturnPage.tsx`, `web/src/components/AuthVideo.tsx`, `web/src/components/wizard.tsx`, `web/src/lib/orderStatus.ts`
+- **Files changed:** `web/src/App.tsx`, `web/src/lib/api.ts`, `web/src/lib/types.ts`, `web/src/pages/NewOrderPage.tsx`, `web/src/styles.css`
+- **Previous behavior:** "Đơn hàng", order detail and "Nhận hàng hoàn" were placeholder pages.
+- **New behavior:**
+  - `/orders` lists orders with search by tracking code or order ID, which videos exist and one combined status (Chờ video đóng gói, Chờ hàng hoàn, Chờ kiểm tra, Đang kiểm tra, Cần xem xét, Khớp, Có sai lệch, Kiểm tra lỗi).
+  - `/orders/:orderId` shows the order details and plays both videos. Videos are fetched with the auth header and played from an object URL. A missing video links to the screen that adds it.
+  - `/returns/new` scans the label with a return scan: an unknown code says no order was found; an order that already has a return video links to the order; otherwise the person records or (demo) attaches the opening video, which is uploaded with progress. An order without a packing video gets a warning but can still receive the return video.
+  - The step indicator and progress bar are shared components.
+- **Not included:** starting an inspection and showing its result from `web/` (still done in `frontend/`), and replacing an existing return video.
+- **Tests executed:** `npm run typecheck`, Prettier and build in `web/` OK. In headless Chrome against a throwaway database, as the owner: 9 orders listed; search finds one and shows an empty state for an unknown code; a detail page plays the packing video; return flow for an unknown code, for an order with a return video, and for `TRK-1004` with a file upload, after which the detail page plays both videos with status "Chờ kiểm tra". Phone layout checked at 390x844. No page errors.
+- **Suggested Git commit:** `feat(web): add orders list, order detail and return receiving screens`
+
+---
+
+## Scan-first redesign W5 — AI inspection from the order page in `web/`
+
+- **Files added:** `web/src/components/InspectionCard.tsx`, `web/src/components/AuthImage.tsx`, `web/src/lib/inspectionText.ts`
+- **Files changed:** `web/src/pages/OrderDetailPage.tsx`, `web/src/lib/api.ts`, `web/src/lib/types.ts`, `web/src/styles.css`, `backend/src/app.ts`
+- **New behavior:**
+  - The order page has a "Kiểm tra bằng AI" card once both videos exist. It starts the inspection, polls every 1.5 s and shows three plain steps (check videos, AI analysis, compare and conclude). A finished result loads again when the order is reopened; "Kiểm tra lại" retries a failed or escalated inspection and runs a new one otherwise.
+  - The result is a one-line verdict in Vietnamese, the reasons a person must look, the observed differences with severity and one supporting frame from each video, attributes that could not be verified, and the neutral "not proof of wrongdoing" note. Demo results are labelled. Agent logs stay in the terminal; backend text is only available under a collapsed "Chi tiết kỹ thuật".
+  - **Terminal log:** successful `GET /api/inspections/:id` requests are no longer printed by the HTTP logger, because polling put a line between agent trace lines every 1.5 s. Failed requests are still logged.
+- **Not included:** values read by the AI (for example model and colour) are shown as the model wrote them, in English; the draft claim is only mentioned, as the claim screens are the next step.
+- **Tests executed:** `npm run typecheck`, Prettier and build in `web/` OK; backend typecheck OK and `npm test` 175 passed, 3 skipped. In headless Chrome against a throwaway database in demo mode (no Gemini calls): `ORD-001` matches, `ORD-003` shows model and colour differences with frames and a draft claim, `ORD-005` (dark video) asks for a person and gives the reason, `ORD-004` without a return video offers no button, reopening loads the result and retry works. With repeated polling the log had no successful polling line while a request with a bad ID was still logged. **Not yet run with real Gemini.**
+- **Suggested Git commits:** `chore(backend): keep inspection polling out of the terminal log`, `feat(web): run the AI inspection and show its result on the order page`
+
+---
+
+## Faster `analyze_item` — thinking level, parallel videos, frame filter, reuse
+
+- **Files added:** `backend/tests/analysisSpeed.test.ts`
+- **Files changed:** `backend/src/agent/tools/analyzeItem.ts`, `backend/src/agent/agentState.ts`, `backend/src/agent/agentTrace.ts`, `backend/src/agent/schemas.ts`, `backend/src/services/visionService.ts`, `backend/src/services/vision/geminiVisionProvider.ts`, `backend/src/services/mediaService.ts`, `backend/src/models/MediaEvidence.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/tests/fixitAgent.test.ts`
+- **Previous behavior:** the two videos were analysed one after the other, every extracted frame was sent when there were no more than `MAX_FRAMES_PER_ANALYSIS`, the model's default thinking level applied, and every run called the AI again.
+- **New behavior:**
+  - **Thinking level:** `.env.example` now sets `GEMINI_THINKING_LEVEL=LOW`. An unset value still means the model's default.
+  - **Parallel videos:** the first `analyze_item` that needs the AI also starts the other video's request. That video's own `analyze_item` call then waits for the result. Tools still run one at a time, so the workflow states, the planner and the tool log keep their order, and `inspection.save()` is never called concurrently. Each request is charged to the budget when it starts. A failed request is retried alone.
+  - **Frame filter:** `selectFrames` leaves out dark and blurry frames, and falls back to all frames when fewer than 3 are clear. Video-level quality checks still use the ratios measured on all frames.
+  - **Reuse:** a good AI analysis is stored on the media document (`analysisCache`, not returned by the API) and reused by later runs without an AI request or budget charge. The key covers provider, model, thinking level, effort, system prompt, schema, the order's checklist and the selected frames. "Good" means source `ai`, confidence at least `CONFIDENCE_THRESHOLD` and lighting and focus not `unusable`, so running a weak result again is a real second attempt. Analyses with segment frames are not stored. `AI_ANALYSIS_CACHE=false` turns this off.
+  - **Terminal log:** new lines for the parallel start and `frames sent: N of M extracted`; a reused result says `REUSED from an earlier run, no AI call`; Gemini log lines and errors name the video, for example `Vision model (return)`.
+- **Reason:** `analyze_item` was the slowest step. Output and comparison rules are unchanged.
+- **Compatibility impact:** `AnalysisRecord` gains an optional `reused` field. No migration: existing media simply have no stored analysis.
+- **Tests executed:** typecheck OK; `npm test` 187 passed, 3 skipped; Prettier and build OK. Tests use a delayed provider reporting as `ai`: two requests overlap, either video failing retries only that video, reuse makes no new calls, a replaced video or changed checklist, thinking level or provider analyses again, and weak results are not kept. **Not yet measured with real Gemini.**
+- **Known limitations:**
+  - `LOW` may read small print or fine damage less well; compare on real videos and use `MEDIUM` if so.
+  - The sharpness check can mark a frame blurry because of hand movement, so a frame showing the item in motion may be left out.
+  - If one video's request fails for good, the other video's request has already been spent.
+  - A good but wrong analysis is reused until something in the key changes or `AI_ANALYSIS_CACHE=false`. Changing `normalizeAnalysis` does not invalidate stored results.
+  - The time shown for each `analyze_item` no longer equals that video's AI time, because the second call only waits for what is left. Use the `replied in` lines.
+- **Suggested Git commit:** `feat(agent): speed up analyze_item with parallel videos, frame filter and result reuse`
+
+---
+
+## Product match check — wording differences no longer draft a claim
+
+- **Files added:** `backend/src/agent/tools/verifyProductMatch.ts`, `backend/tests/productMatch.test.ts`
+- **Files changed:** `backend/src/agent/prompts.ts`, `backend/src/agent/schemas.ts`, `backend/src/agent/agentState.ts`, `backend/src/agent/agentTrace.ts`, `backend/src/agent/planners/deterministicPlanner.ts`, `backend/src/agent/planners/geminiPlanner.ts`, `backend/src/agent/tools/index.ts`, `backend/src/agent/tools/compareItems.ts`, `backend/src/services/comparisonService.ts`, `backend/src/services/evidenceValidationService.ts`, `backend/src/services/inspectionService.ts`, `backend/src/services/visionService.ts`, `backend/src/services/vision/types.ts`, `backend/src/services/vision/geminiVisionProvider.ts`, `backend/src/services/vision/demoVisionProvider.ts`, `backend/src/models/Inspection.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `web/src/components/InspectionCard.tsx`, `web/src/lib/inspectionText.ts`, `web/src/lib/types.ts`, and the tests whose flow gained the new step
+- **Previous behavior:** two independent descriptions were compared as text. On a real pair showing one product, "display module" vs "OLED display module" and "blue PCB with dark screen" vs "blue and black" were reported as high and medium discrepancies and a draft claim was created.
+- **New behavior:**
+  - **Prompt:** `productType` is a short generic noun phrase, `color` one word from a basic list (requested in the prompt, not enforced by the schema), `model` only a printed code. A box open because it is being packed or opened is no longer `opened_or_tampered`. Product attributes cite only frames where the product is visible.
+  - **Comparison:** product words ignore order, plurals, filler words and Vietnamese diacritics. Colours agree when one side names only colours the other names. A brand in front of a model code is ignored, while `SW-200` vs `SW-200-LITE` still differs.
+  - **`verify_product_match` (new tool, the 10th):** a remaining product type or colour difference is listed in `comparison.visualChecks` and counted as unverified, not as a discrepancy. The tool sends up to `MAX_FRAMES_PER_MATCH_CHECK` (default 5) frames of each video in one request, preferring frames cited for the product, with no product name. `same` drops the difference, `different` makes it a finding with the frames the model cited, `uncertain` keeps it unverified.
+  - **Not relied on, treated as `uncertain`:** confidence below `CONFIDENCE_THRESHOLD`, no valid frame cited for one of the videos, or text addressed to the AI in the footage.
+  - **Safety:** an unsettled check raises advisory `PRODUCT_MATCH_UNVERIFIED`, so a person reviews it and no claim comes from it, including when a planner skips the tool or the AI call fails. The answer cannot change findings from a printed model code, quantity or damage.
+  - **Terminal log and web:** the trace shows the values being checked, the frames sent, the verdict, why, and the discrepancy count afterwards. The order page says what the direct comparison found.
+- **Compatibility impact:** the prompt change invalidates stored analyses, so the first run per video calls the AI again. `ComparisonResult` gains `visualChecks`; `Inspection` gains `productMatch`. In demo data the `mismatch` scenario's colour finding now arrives through the new tool.
+- **Tests executed:** typecheck OK; `npm test` 206 passed, 3 skipped; backend build OK; `web/` typecheck, Prettier and build OK. Tests replay the real wording with a scripted provider: same, different, uncertain, low confidence, invalid frames, instruction text, AI failure, an unsupported provider and a skipped check. In headless Chrome against a throwaway database in demo mode (no Gemini calls): `ORD-001` matches with no extra call; `ORD-003` and `ORD-006` report model and colour differences with a claim and the new line on the page. **Not yet run with real Gemini, so accuracy on real videos is unknown.**
+- **Known limitations:**
+  - The result of this check is not stored, so "Kiểm tra lại" reuses the analyses but asks this question again, and the answer may change.
+  - Only up to 5 frames per video are sent. If none shows the product well the answer should be `uncertain`, which costs a human review rather than a wrong claim.
+  - A model that writes a description into `model` instead of a printed code still counts as a model mismatch; only the prompt guards against this.
+- **Suggested Git commits:** `feat(agent): verify product differences by comparing both videos before any claim`, `feat(web): show the direct video comparison result on the order page`, `docs: record the product match check and update the plan`
+
+---
+
+## Anthropic provider removed
+
+- **Files removed:** `backend/src/services/vision/anthropicVisionProvider.ts`, `backend/src/agent/planners/llmPlanner.ts`
+- **Files changed:** `backend/src/config/env.ts`, `backend/.env.example`, `backend/package.json`, `backend/package-lock.json`, `backend/src/services/vision/index.ts`, `backend/src/services/visionService.ts`, `backend/src/agent/fixitAgent.ts`, `backend/src/agent/toolRegistry.ts`, `backend/src/agent/agentState.ts`, `backend/src/agent/planners/types.ts`, `backend/src/models/Inspection.ts`, `web/src/components/ModeChips.tsx`, `backend/tests/agentTools.test.ts`, `backend/tests/config.test.ts`, `backend/tests/fixitAgent.test.ts`, `backend/tests/geminiPlanner.test.ts`, `backend/tests/vision.test.ts`, `docs/FIXIT_AGENT_OVERVIEW.md`, `docs/BOI_CANH_VA_KE_HOACH.md`
+- **Previous behavior:** `AI_PROVIDER` also accepted `anthropic`, which used a Claude vision provider and planner through `@anthropic-ai/sdk`.
+- **New behavior:**
+  - Gemini is the only real AI provider; `AI_PROVIDER` accepts `gemini | demo`. Any other value stops the server at startup with a config error.
+  - `AGENT_PLANNER=llm` always uses `GeminiPlanner`. Falling back to the deterministic planner is unchanged.
+  - Removed settings: `AI_API_KEY`, `ANTHROPIC_API_KEY`, `AI_MODEL`, `AI_EFFORT`, `AI_MAX_RETRIES`, `AI_REFUSAL_FALLBACK`. Left in an `.env`, they are ignored.
+  - Removed values: `plannerUsed: "anthropic"` and `executionLabel: "REAL_ANTHROPIC"`.
+- **Compatibility impact:**
+  - `AI_EFFORT` is no longer part of the analysis cache key, so the first run per video calls Gemini again.
+  - A stored inspection with a removed value would fail validation when saved again. The local database had none (0 of 8 inspections); other databases were not checked.
+  - Older entries in this changelog still describe Anthropic as it was at the time.
+- **Tests executed:** typecheck OK; `npm test` 197 passed, 3 skipped; backend build OK; `web/` typecheck OK; Prettier OK on every changed file. The count drops by 9: 4 Claude vision tests and 5 Claude planner tests already covered by `geminiVision.test.ts` and `geminiPlanner.test.ts`. The iteration-limit test now uses a scripted planner, and the check that the narrative stays separate from the summary moved to `geminiPlanner.test.ts`. **No real Gemini call was made for this change.**
+- **Suggested Git commit:** `refactor(agent): remove the Anthropic provider and keep Gemini only`
+
+## Gemini resilience — retry timeouts and 504, stream vision requests
+
+- **Files changed:** `backend/src/services/ai/gemini.ts`, `backend/src/services/vision/geminiVisionProvider.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/tests/geminiStream.test.ts` (new), `backend/tests/geminiVision.test.ts`, `backend/tests/segmentVision.test.ts`, `backend/tests/geminiPlanner.test.ts`, `backend/tests/agentTrace.test.ts`, `backend/tests/retry.test.ts`, `docs/BOI_CANH_VA_KE_HOACH.md`
+- **Previous behavior:** only 429 and 503 were retried inside `callGemini`. A timeout or a 504 cost a full 180 s attempt, then went back to the agent as a failed tool call.
+- **New behavior:**
+  - `callGemini` also retries 504 and timeouts, using the same backoff and `AI_RETRY_MAX_ATTEMPTS`. If they persist the error is final, like 429/503, so tool retries do not multiply them.
+  - Vision requests (`analyze_item`, `verify_product_match`, `inspect_video_segment`) are streamed. An attempt with no chunk within `AI_FIRST_CHUNK_TIMEOUT_MS` (default 90 s, not yet tuned on real data) is given up and retried. A reply that has started is only limited by `AI_TIMEOUT_MS`.
+  - The planner is not streamed: its turns are sent back verbatim with their thought signatures. It does get the new retries.
+  - A persistent 429 now keeps Google's explanation, so the error says which limit was hit.
+  - Trace: a `first chunk after Xs` line, and retry lines that name the reason. `usage.firstChunkMs` is stored with each vision result.
+- **Compatibility impact:** a timeout that persists now ends in human review after 3 attempts within the tool budget, instead of several tool retries of 180 s each. Network failures such as `fetch failed` still retry at tool level, as before.
+- **Tests executed:** typecheck OK; `npm test` 210 passed, 3 skipped; Prettier OK on every changed file. `geminiStream.test.ts` drives the real SDK against a local HTTP server: stall before and after the headers, stall mid-reply, 504, persistent failures.
+- **Real Gemini run:** 6 requests with `gemini-3.8-flash`, **all failed**. One attempt hit the first-chunk limit and was retried as designed; then 429 on every remaining attempt. **No streamed reply from real Gemini has been parsed yet, and the effect on failure rate is not measured.**
+- **Suggested Git commit:** `feat(ai): retry Gemini timeouts and 504, stream vision requests to detect stuck calls`

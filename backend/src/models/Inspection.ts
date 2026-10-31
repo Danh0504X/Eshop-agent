@@ -36,7 +36,7 @@ const AgentLogSchema = new Schema(
         error: String,
         message: String,
         durationMs: Number,
-        /** Which planner made (or would have made) this decision: gemini | anthropic | deterministic. */
+        /** Which planner made (or would have made) this decision: gemini | deterministic. */
         planner: String,
         selectedTools: { type: [String], default: undefined },
         /** The planner's own one-line justification for its tool choice (LLM planners only). */
@@ -78,6 +78,8 @@ const InspectionSchema = new Schema(
         outboundAnalysis: { type: Schema.Types.Mixed },
         returnAnalysis: { type: Schema.Types.Mixed },
         comparison: { type: Schema.Types.Mixed },
+        /** The look at frames of both videos together, when the written product descriptions differed. */
+        productMatch: { type: Schema.Types.Mixed },
         /** Model-reported confidence is stored as-is; it is NOT treated as a calibrated probability. */
         confidence: {
             score: Number,
@@ -109,9 +111,9 @@ const InspectionSchema = new Schema(
         agentNarrative: { type: String },
         plannerFallback: { type: Boolean, default: false },
         /** Planner that produced the final decisions (after any fallback). */
-        plannerUsed: { type: String, enum: ["gemini", "anthropic", "deterministic"] },
+        plannerUsed: { type: String, enum: ["gemini", "deterministic"] },
         /** One-glance provenance label for UI, logs and reports. */
-        executionLabel: { type: String, enum: ["REAL_GEMINI", "REAL_ANTHROPIC", "DEMO", "DETERMINISTIC_FALLBACK"] },
+        executionLabel: { type: String, enum: ["REAL_GEMINI", "DEMO", "DETERMINISTIC_FALLBACK"] },
         recommendedAction: { type: String },
         claimId: { type: Schema.Types.ObjectId, ref: "Claim" },
         agentLog: { type: [AgentLogSchema], default: [] },

@@ -1,6 +1,7 @@
 import { ApiError as GenAiApiError } from "@google/genai";
 import { describe, expect, it } from "vitest";
-import { classifyTransient, parseRetryDelayMs } from "../src/services/ai/gemini";
+import { classifyTransient, GeminiStallError, parseRetryDelayMs } from "../src/services/ai/gemini";
+import { ApiError } from "../src/utils/errors";
 import { backoffDelay, retryWithBackoff, RetryExhaustedError } from "../src/utils/retry";
 
 /** A fake clock: sleep() advances time instantly and records each wait. */
@@ -165,11 +166,18 @@ describe("Gemini transient error classification", () => {
         expect(parseRetryDelayMs(new GenAiApiError({ status: 503, message: body(503) }))).toBeUndefined();
     });
 
-    it("retries only 429 and 503", () => {
-        for (const status of [429, 503])
+    it("retries 429, 503, 504 and requests that took too long, nothing else", () => {
+        for (const status of [429, 503, 504])
             expect(classifyTransient(new GenAiApiError({ status, message: "x" })).retry).toBe(true);
         for (const status of [400, 401, 403, 404, 500])
             expect(classifyTransient(new GenAiApiError({ status, message: "x" })).retry).toBe(false);
-        expect(classifyTransient(new Error("timeout")).retry).toBe(false);
+        for (const error of [
+            new GeminiStallError(90_000),
+            Object.assign(new Error("This operation was aborted"), { name: "AbortError" }),
+        ])
+            expect(classifyTransient(error).retry).toBe(true);
+        expect(classifyTransient(new TypeError("fetch failed")).retry).toBe(false);
+        // Our own "no time left" error must end the request, even though it is about time.
+        expect(classifyTransient(new ApiError("AI_ERROR", "request timed out")).retry).toBe(false);
     });
 });

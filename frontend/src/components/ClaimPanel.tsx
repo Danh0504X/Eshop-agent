@@ -10,9 +10,6 @@ export const ClaimPanel = ({ claimId, user, onChanged }: { claimId: string; user
     const [reason, setReason] = useState("");
     const [determination, setDetermination] = useState("");
     const [reference, setReference] = useState("");
-    const [requested, setRequested] = useState("");
-    const [actual, setActual] = useState("");
-    const [refundNote, setRefundNote] = useState("");
     const action = useAction();
 
     const load = () => action.run(async () => setClaim((await api.getClaim(claimId)).claim));
@@ -20,10 +17,6 @@ export const ClaimPanel = ({ claimId, user, onChanged }: { claimId: string; user
         void load();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [claimId]);
-    useEffect(() => {
-        if (claim?.requestedCompensation !== undefined) setRequested(String(claim.requestedCompensation));
-        if (claim?.actualRefund !== undefined) setActual(String(claim.actualRefund));
-    }, [claim?.requestedCompensation, claim?.actualRefund]);
 
     const act = (fn: () => Promise<{ claim: Claim }>) =>
         action.run(async () => {
@@ -147,52 +140,6 @@ export const ClaimPanel = ({ claimId, user, onChanged }: { claimId: string; user
                     </button>
                     <span className="muted small">FixIt never submits claims externally.</span>
                 </div>
-            )}
-
-            <h4>Refund tracking {!owner && <span className="muted small">(owner only)</span>}</h4>
-            <div className="row">
-                <label>
-                    Requested ({claim.currency})
-                    <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={requested}
-                        onChange={(e) => setRequested(e.target.value)}
-                    />
-                </label>
-                <label>
-                    Actual refund ({claim.currency})
-                    <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={actual}
-                        onChange={(e) => setActual(e.target.value)}
-                    />
-                </label>
-                <input
-                    placeholder="Note (optional)"
-                    value={refundNote}
-                    onChange={(e) => setRefundNote(e.target.value)}
-                />
-                <button
-                    disabled={!owner || action.busy || requested === "" || actual === ""}
-                    onClick={() =>
-                        act(() =>
-                            api.recordRefund(claim._id, Number(requested), Number(actual), refundNote || undefined),
-                        )
-                    }
-                >
-                    Save refund amounts
-                </button>
-            </div>
-            {claim.refund?.recordedAt && (
-                <p className={claim.refund.flagged ? "banner warn" : "small"}>
-                    Discrepancy: {claim.refund.discrepancyAmount} {claim.currency}
-                    {claim.refund.flagged ? " - actual refund is lower than requested." : " - no shortfall."} Payment
-                    verified: no (amounts entered manually).
-                </p>
             )}
             <ErrorText error={action.error} />
 

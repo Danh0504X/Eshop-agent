@@ -32,7 +32,6 @@ export interface ReportModel {
         product: string;
         expectedQuantity: number;
         accessories: string;
-        declaredValue: string;
     };
     summary: string;
     findings: Array<{
@@ -135,7 +134,6 @@ export const buildReportModel = (input: ReportInput): ReportModel => {
             product: r([order.product?.name, order.product?.model, order.product?.color].filter(Boolean).join(" / ")),
             expectedQuantity: order.expectedQuantity,
             accessories: r(order.expectedAccessories.join(", ")) || "none",
-            declaredValue: `${order.declaredValue} ${order.currency}`,
         },
         summary: r(input.summary),
         findings: reportable.map((f) => ({
@@ -240,7 +238,6 @@ export const renderReportPdf = async (model: ReportModel, options: { compress?: 
         doc.text(t(`Order ID: ${o.orderId}    Tracking: ${o.trackingCode}`));
         doc.text(t(`Product: ${o.product}`));
         doc.text(t(`Expected quantity: ${o.expectedQuantity}    Accessories: ${o.accessories}`));
-        doc.text(t(`Declared value: ${o.declaredValue}`));
 
         heading("Neutral summary");
         doc.text(t(model.summary));

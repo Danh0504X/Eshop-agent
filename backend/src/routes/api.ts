@@ -8,6 +8,7 @@ import claimRoute from "./claimRoute";
 import inspectionRoute from "./inspectionRoute";
 import mediaRoute from "./mediaRoute";
 import orderRoute from "./orderRoute";
+import scanRoute from "./scanRoute";
 
 const router = express.Router();
 
@@ -23,6 +24,8 @@ router.get("/health", (_request, response) => {
         aiModel: models?.vision ?? null,
         plannerModel: models && env.AGENT_PLANNER === "llm" ? models.planner : null,
         planner: env.aiMode === "real" ? env.AGENT_PLANNER : "deterministic",
+        // Whether evidence may be attached as a file (demo) or must be recorded in the app after the scan.
+        allowFileEvidence: env.ALLOW_FILE_EVIDENCE,
     });
 });
 
@@ -32,6 +35,7 @@ router.get("/openapi.json", (_request, response) => {
 router.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDocument, { customSiteTitle: "FixIt AI Agent API" }));
 
 router.use("/auth", authRoute);
+router.use("/scans", scanRoute);
 router.use("/orders", orderRoute);
 router.use("/media", mediaRoute);
 router.use("/inspections", inspectionRoute);

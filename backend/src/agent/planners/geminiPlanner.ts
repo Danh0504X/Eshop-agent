@@ -29,6 +29,7 @@ export const agentSnapshot = (ctx: AgentContext) => ({
         returnAnalyzed: Boolean(ctx.analyses.return),
         compared: Boolean(ctx.comparison),
         materialDiscrepancies: ctx.comparison?.materialDiscrepancyCount ?? null,
+        pendingVisualChecks: (ctx.comparison?.visualChecks ?? []).filter((c) => c.status === "pending").length,
         finalVerificationDone: Boolean(ctx.finalValidation),
         claimDrafted: Boolean(ctx.claimId),
         humanReviewRequested: ctx.reviewTaskCreated,

@@ -109,6 +109,7 @@ export const retryInspection = async (principal: AuthPrincipal, inspectionId: st
         outboundAnalysis: undefined,
         returnAnalysis: undefined,
         comparison: undefined,
+        productMatch: undefined,
         confidence: undefined,
         uncertainty: [],
         frameReferences: [],
