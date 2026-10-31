@@ -1,5 +1,5 @@
 import type { Tone } from "../components/ui";
-import type { Inspection } from "./types";
+import type { Inspection, InspectionRun } from "./types";
 
 /** Why a person has to look, for each escalation code the backend can raise. */
 export const ESCALATION_TEXT: Record<string, string> = {
@@ -89,6 +89,15 @@ export const verdict = (inspection: Inspection): { tone: Tone; title: string } =
     return inspection.claimId
         ? { tone: "warn", title: "Phát hiện sai lệch, đã tạo khiếu nại nháp" }
         : { tone: "ok", title: "Hàng trả về khớp với lúc đóng gói" };
+};
+
+/** The short outcome of one run in the inspection history. */
+export const runStatus = (run: InspectionRun): { label: string; tone: Tone } => {
+    if (run.status === "failed") return { label: "Lỗi", tone: "bad" };
+    if (run.status === "needs_review") return { label: "Cần xem xét", tone: "warn" };
+    if (run.status === "completed")
+        return run.claimId ? { label: "Có sai lệch", tone: "bad" } : { label: "Khớp", tone: "ok" };
+    return { label: "Đang kiểm tra", tone: "info" };
 };
 
 export const PROGRESS_STEPS = ["Kiểm tra video", "AI phân tích từng video", "So sánh và kết luận"];

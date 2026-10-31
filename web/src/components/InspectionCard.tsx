@@ -3,58 +3,21 @@ import { api } from "../lib/api";
 import {
     attributeText,
     ESCALATION_TEXT,
-    FINDING_TITLE,
     MATCH_VERDICT,
-    observationText,
     PROGRESS_STEPS,
     progressIndex,
-    SEVERITY,
+    runStatus,
     verdict,
 } from "../lib/inspectionText";
 import { formatDateTime } from "../lib/orderStatus";
-import type { Finding, Inspection } from "../lib/types";
-import { AuthImage } from "./AuthImage";
+import type { Inspection, InspectionRun } from "../lib/types";
+import { FindingList } from "./FindingList";
 import { IconCheck } from "./icons";
-import { Alert, Button, Card, cx, ErrorAlert, Pill, Spinner } from "./ui";
+import { Alert, Button, Card, cx, ErrorAlert, LinkButton, Pill, Spinner } from "./ui";
 
 const POLL_MS = 1500;
 const isRunning = (inspection: Inspection | null) =>
     inspection?.status === "pending" || inspection?.status === "processing";
-
-const FindingRow = ({ finding, inspection }: { finding: Finding; inspection: Inspection }) => {
-    const severity = SEVERITY[finding.severity];
-    // One supporting frame from each video, next to each other.
-    const frames = (["outbound", "return"] as const).flatMap((type) => {
-        const evidence = finding.evidence.find((e) => e.type === type);
-        const reference = inspection.frameReferences.find((f) => f.frameId === evidence?.frameId);
-        return evidence && reference?.imageUrl ? [{ type, evidence, imageUrl: reference.imageUrl }] : [];
-    });
-    return (
-        <li className="finding">
-            <div className="finding-head">
-                <span className="finding-title">{FINDING_TITLE[finding.category] ?? finding.category}</span>
-                {severity && <Pill tone={severity.tone}>{severity.label}</Pill>}
-            </div>
-            <p className="finding-compare">
-                Lúc đóng gói: <b>{observationText(finding.outboundObservation)}</b> · Khi hoàn trả:{" "}
-                <b>{observationText(finding.returnObservation)}</b>
-            </p>
-            {frames.length > 0 && (
-                <div className="finding-frames">
-                    {frames.map(({ type, evidence, imageUrl }) => (
-                        <figure key={type}>
-                            <AuthImage src={imageUrl} alt={`Khung hình ${evidence.frameId}`} />
-                            <figcaption>
-                                {type === "outbound" ? "Đóng gói" : "Hoàn trả"}
-                                {evidence.timestampSec !== null && ` · ${evidence.timestampSec.toFixed(1)} giây`}
-                            </figcaption>
-                        </figure>
-                    ))}
-                </div>
-            )}
-        </li>
-    );
-};
 
 const Result = ({ inspection }: { inspection: Inspection }) => {
     const { tone, title } = verdict(inspection);
@@ -67,6 +30,13 @@ const Result = ({ inspection }: { inspection: Inspection }) => {
             <Alert tone={tone} title={title}>
                 Kiểm tra lúc {formatDateTime(inspection.finishedAt ?? inspection.createdAt)}
             </Alert>
+            {inspection.claimId && (
+                <div className="row-actions">
+                    <LinkButton to={`/claims/${inspection.claimId}`} variant="primary">
+                        Xem khiếu nại và báo cáo
+                    </LinkButton>
+                </div>
+            )}
             {inspection.analysisMode === "demo" && (
                 <Alert tone="warn" title="Kết quả demo">
                     Đây là dữ liệu định sẵn, không phải kết quả phân tích của AI.
@@ -85,11 +55,10 @@ const Result = ({ inspection }: { inspection: Inspection }) => {
             {findings.length > 0 && (
                 <div>
                     <p className="section-label">Khác biệt quan sát được</p>
-                    <ul className="finding-list">
-                        {findings.map((finding) => (
-                            <FindingRow key={finding.id} finding={finding} inspection={inspection} />
-                        ))}
-                    </ul>
+                    <FindingList
+                        findings={findings}
+                        frameUrl={(frameId) => inspection.frameReferences.find((f) => f.frameId === frameId)?.imageUrl}
+                    />
                 </div>
             )}
             {inspection.productMatch && (
@@ -139,7 +108,10 @@ export const InspectionCard = ({
     onChanged: () => void;
 }) => {
     const [inspectionId, setInspectionId] = useState(initialInspectionId);
+    /** The run new checks continue from; `inspectionId` can point at an older one from the history. */
+    const [latestId, setLatestId] = useState(initialInspectionId);
     const [inspection, setInspection] = useState<Inspection | null>(null);
+    const [history, setHistory] = useState<InspectionRun[]>([]);
     const [run, setRun] = useState(0);
     const [starting, setStarting] = useState(false);
     const [error, setError] = useState<unknown>(null);
@@ -174,6 +146,27 @@ export const InspectionCard = ({
         };
     }, [inspectionId, run]);
 
+    // The history only adds to the card, so a failure to load it is not shown.
+    const status = inspection?.status;
+    useEffect(() => {
+        if (!latestId) return;
+        let cancelled = false;
+        api.listInspections(orderId)
+            .then((result) => {
+                if (!cancelled) setHistory(result.inspections);
+            })
+            .catch(() => undefined);
+        return () => {
+            cancelled = true;
+        };
+    }, [orderId, latestId, status]);
+
+    const view = (id: string) => {
+        setError(null);
+        setInspection(null);
+        setInspectionId(id);
+    };
+
     const start = async () => {
         setStarting(true);
         setError(null);
@@ -183,6 +176,7 @@ export const InspectionCard = ({
             const result = canRetry ? await api.retryInspection(inspection._id) : await api.startInspection(orderId);
             setInspection(result.inspection);
             setInspectionId(result.inspection._id);
+            setLatestId(result.inspection._id);
             setRun((n) => n + 1);
             notify.current();
         } catch (e) {
@@ -195,10 +189,19 @@ export const InspectionCard = ({
     const running = isRunning(inspection);
     const loading = Boolean(inspectionId) && !inspection && !error;
     const current = inspection ? progressIndex(inspection.workflowState) : 0;
+    const viewingOlder = inspectionId !== latestId;
 
     return (
         <Card title="Kiểm tra bằng AI">
             <div className="stack">
+                {viewingOlder && latestId && (
+                    <Alert tone="info" title="Đang xem một lần kiểm tra trước đây">
+                        <Button size="sm" onClick={() => view(latestId)}>
+                            Về lần mới nhất
+                        </Button>
+                    </Alert>
+                )}
+
                 {loading && (
                     <div className="inline-loading">
                         <Spinner />
@@ -233,12 +236,37 @@ export const InspectionCard = ({
 
                 <ErrorAlert error={error} />
 
-                {ready && !running && !loading && (
+                {ready && !running && !loading && !viewingOlder && (
                     <div className="row-actions">
                         <Button variant={inspection ? "secondary" : "primary"} busy={starting} onClick={start}>
                             {inspection ? "Kiểm tra lại" : "Kiểm tra bằng AI"}
                         </Button>
                     </div>
+                )}
+
+                {/* Leaving a running check would stop the polling that updates the order page when it ends. */}
+                {history.length > 1 && !running && (
+                    <details className="technical">
+                        <summary>Các lần kiểm tra ({history.length})</summary>
+                        <ul className="run-list">
+                            {history.map((item) => {
+                                const outcome = runStatus(item);
+                                return (
+                                    <li key={item._id}>
+                                        <button
+                                            type="button"
+                                            className={cx("run-row", item._id === inspectionId && "active")}
+                                            aria-current={item._id === inspectionId ? "true" : undefined}
+                                            onClick={() => view(item._id)}
+                                        >
+                                            <span>{formatDateTime(item.finishedAt ?? item.createdAt)}</span>
+                                            <Pill tone={outcome.tone}>{outcome.label}</Pill>
+                                        </button>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </details>
                 )}
             </div>
         </Card>
