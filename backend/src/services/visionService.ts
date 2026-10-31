@@ -135,7 +135,7 @@ const analysisKey = (media: MediaDoc, order: OrderDoc): string => {
                 contract: ANALYSIS_CONTRACT,
                 provider: getVisionProvider().source,
                 model: activeModels(env)?.vision,
-                thinking: [env.GEMINI_THINKING_LEVEL ?? null, env.AI_EFFORT],
+                thinking: env.GEMINI_THINKING_LEVEL ?? null,
                 checklist: buildVisionUserText({
                     evidenceType: media.type,
                     productName: product.name,

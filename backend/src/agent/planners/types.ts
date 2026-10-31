@@ -16,7 +16,7 @@ export interface ToolOutcome {
 }
 
 /** Which implementation produced a decision; recorded on every planner log entry. */
-export type PlannerName = "gemini" | "anthropic" | "deterministic";
+export type PlannerName = "gemini" | "deterministic";
 
 /** Decides the next tool call(s). Planners only propose; the tool registry decides what may run. */
 export interface Planner {

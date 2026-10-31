@@ -387,3 +387,22 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
   - Only up to 5 frames per video are sent. If none shows the product well the answer should be `uncertain`, which costs a human review rather than a wrong claim.
   - A model that writes a description into `model` instead of a printed code still counts as a model mismatch; only the prompt guards against this.
 - **Suggested Git commits:** `feat(agent): verify product differences by comparing both videos before any claim`, `feat(web): show the direct video comparison result on the order page`, `docs: record the product match check and update the plan`
+
+---
+
+## Anthropic provider removed
+
+- **Files removed:** `backend/src/services/vision/anthropicVisionProvider.ts`, `backend/src/agent/planners/llmPlanner.ts`
+- **Files changed:** `backend/src/config/env.ts`, `backend/.env.example`, `backend/package.json`, `backend/package-lock.json`, `backend/src/services/vision/index.ts`, `backend/src/services/visionService.ts`, `backend/src/agent/fixitAgent.ts`, `backend/src/agent/toolRegistry.ts`, `backend/src/agent/agentState.ts`, `backend/src/agent/planners/types.ts`, `backend/src/models/Inspection.ts`, `web/src/components/ModeChips.tsx`, `backend/tests/agentTools.test.ts`, `backend/tests/config.test.ts`, `backend/tests/fixitAgent.test.ts`, `backend/tests/geminiPlanner.test.ts`, `backend/tests/vision.test.ts`, `docs/FIXIT_AGENT_OVERVIEW.md`, `docs/BOI_CANH_VA_KE_HOACH.md`
+- **Previous behavior:** `AI_PROVIDER` also accepted `anthropic`, which used a Claude vision provider and planner through `@anthropic-ai/sdk`.
+- **New behavior:**
+  - Gemini is the only real AI provider; `AI_PROVIDER` accepts `gemini | demo`. Any other value stops the server at startup with a config error.
+  - `AGENT_PLANNER=llm` always uses `GeminiPlanner`. Falling back to the deterministic planner is unchanged.
+  - Removed settings: `AI_API_KEY`, `ANTHROPIC_API_KEY`, `AI_MODEL`, `AI_EFFORT`, `AI_MAX_RETRIES`, `AI_REFUSAL_FALLBACK`. Left in an `.env`, they are ignored.
+  - Removed values: `plannerUsed: "anthropic"` and `executionLabel: "REAL_ANTHROPIC"`.
+- **Compatibility impact:**
+  - `AI_EFFORT` is no longer part of the analysis cache key, so the first run per video calls Gemini again.
+  - A stored inspection with a removed value would fail validation when saved again. The local database had none (0 of 8 inspections); other databases were not checked.
+  - Older entries in this changelog still describe Anthropic as it was at the time.
+- **Tests executed:** typecheck OK; `npm test` 197 passed, 3 skipped; backend build OK; `web/` typecheck OK; Prettier OK on every changed file. The count drops by 9: 4 Claude vision tests and 5 Claude planner tests already covered by `geminiVision.test.ts` and `geminiPlanner.test.ts`. The iteration-limit test now uses a scripted planner, and the check that the narrative stays separate from the summary moved to `geminiPlanner.test.ts`. **No real Gemini call was made for this change.**
+- **Suggested Git commit:** `refactor(agent): remove the Anthropic provider and keep Gemini only`

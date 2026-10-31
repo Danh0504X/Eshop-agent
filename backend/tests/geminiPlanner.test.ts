@@ -136,6 +136,7 @@ describe("GeminiPlanner function calling", () => {
         expect(result.status).toBe("completed");
         expect(await Claim.countDocuments({ inspectionId: inspection._id })).toBe(1);
         expect(result.agentNarrative).toMatch(/Draft claim awaits human review/);
+        expect(result.summary).not.toEqual(result.agentNarrative);
 
         // Tools are declared from the registry (planner-visible only) with JSON schemas.
         const declared = requests[0].config.tools[0].functionDeclarations;

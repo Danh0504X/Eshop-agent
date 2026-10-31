@@ -26,7 +26,7 @@ const EnvSchema = z
         JWT_EXPIRES_IN: z.string().default("8h"),
 
         DEMO_MODE: bool(false),
-        AI_PROVIDER: z.enum(["gemini", "anthropic", "demo"]).default("gemini"),
+        AI_PROVIDER: z.enum(["gemini", "demo"]).default("gemini"),
         GEMINI_API_KEY: z.string().optional(),
         // Configurable because Gemini model availability changes; run `npm run gemini:models` to list yours.
         GEMINI_VISION_MODEL: z.string().default("gemini-3.8-flash"),
@@ -42,14 +42,8 @@ const EnvSchema = z
         AI_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(6).default(3),
         AI_RETRY_BASE_DELAY_MS: z.coerce.number().int().min(0).default(2_000),
         AI_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(0).default(30_000),
-        // Legacy Anthropic settings, kept until the Gemini migration is verified end to end.
-        AI_API_KEY: z.string().optional(),
-        AI_MODEL: z.string().default("claude-opus-5-5"),
-        AI_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).default("high"),
         // Per HTTP attempt; shortened automatically to fit the remaining tool/inspection budget.
         AI_TIMEOUT_MS: z.coerce.number().int().positive().default(180_000),
-        AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
-        AI_REFUSAL_FALLBACK: bool(true),
         AGENT_PLANNER: z.enum(["llm", "deterministic"]).default("llm"),
         AGENT_MAX_ITERATIONS: z.coerce.number().int().min(3).max(50).default(20),
         AGENT_TIMEOUT_MS: z.coerce
@@ -112,14 +106,6 @@ const EnvSchema = z
                     "GEMINI_API_KEY is required when AI_PROVIDER=gemini and DEMO_MODE=false. Create a key at https://aistudio.google.com, or set DEMO_MODE=true to run with predefined (non-AI) demo results.",
             });
         }
-        if (!env.DEMO_MODE && env.AI_PROVIDER === "anthropic" && !env.AI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
-            ctx.addIssue({
-                code: "custom",
-                path: ["AI_API_KEY"],
-                message:
-                    "AI_API_KEY is required when AI_PROVIDER=anthropic and DEMO_MODE=false. Set AI_API_KEY, or set DEMO_MODE=true to run with predefined (non-AI) demo results.",
-            });
-        }
         if (env.AI_TIMEOUT_MS >= env.AGENT_TOOL_TIMEOUT_MS) {
             ctx.addIssue({
                 code: "custom",
@@ -150,14 +136,13 @@ export type AppConfig = z.infer<typeof EnvSchema> & {
     /** Effective analysis mode: "demo" whenever DEMO_MODE is on or AI_PROVIDER=demo. */
     aiMode: "real" | "demo";
     /** Which real provider is active (null in demo mode). */
-    activeProvider: "gemini" | "anthropic" | null;
+    activeProvider: "gemini" | null;
 };
 
 /** Model names in use, for health checks and logs. Never includes credentials. */
 export const activeModels = (config: AppConfig): { vision: string; planner: string } | null => {
     if (config.activeProvider === "gemini")
         return { vision: config.GEMINI_VISION_MODEL, planner: config.GEMINI_PLANNER_MODEL };
-    if (config.activeProvider === "anthropic") return { vision: config.AI_MODEL, planner: config.AI_MODEL };
     return null;
 };
 
@@ -171,11 +156,10 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
     const demo = values.DEMO_MODE || values.AI_PROVIDER === "demo";
     return {
         ...values,
-        AI_API_KEY: values.AI_API_KEY ?? source.ANTHROPIC_API_KEY,
         IS_PRODUCTION: values.NODE_ENV === "production",
         uploadDirAbs: path.resolve(values.UPLOAD_DIR),
         aiMode: demo ? "demo" : "real",
-        activeProvider: demo ? null : (values.AI_PROVIDER as "gemini" | "anthropic"),
+        activeProvider: demo ? null : "gemini",
     };
 }
 

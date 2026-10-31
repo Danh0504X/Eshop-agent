@@ -1,7 +1,7 @@
 import { useHealth } from "../lib/health";
 import { Pill } from "./ui";
 
-const PROVIDER_LABEL: Record<string, string> = { gemini: "Gemini", anthropic: "Claude" };
+const PROVIDER_LABEL: Record<string, string> = { gemini: "Gemini" };
 
 /**
  * Always-visible analysis mode, so demo data is never mistaken for a real AI result, plus the demo

@@ -1,6 +1,6 @@
 # FixIt AI Agent — Bối cảnh, nhật ký và hướng đi
 
-> Cập nhật: 30/10/2026 · Nhánh: `feature/scan-first-flow` (tách từ `development`).
+> Cập nhật: 31/10/2026 · Nhánh: `feature/scan-first-flow` (tách từ `development`).
 > Đây là tài liệu sống: cập nhật sau mỗi phase. Chi tiết kỹ thuật của từng thay đổi nằm ở [CHANGELOG_AGENT.md](CHANGELOG_AGENT.md).
 > Lưu ý: [FIXIT_AGENT_OVERVIEW.md](FIXIT_AGENT_OVERVIEW.md) viết trước đợt thiết kế lại này nên **đã lỗi thời** ở nhiều chỗ (xem mục 6).
 
@@ -98,12 +98,13 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 | `98c2987` | Agent: tăng tốc `analyze_item`: thinking `LOW`, phân tích 2 video đồng thời, bỏ frame tối/mờ, dùng lại kết quả khi video không đổi |
 | `27ce961` | Giữ lời giải thích của Google trong lỗi 402 và các lỗi client khác của Gemini |
 | (chưa commit, nhánh `feature/product-match-verification`) | Agent: sửa lỗi bất đối xứng tên sản phẩm theo 3 lớp, thêm tool `verify_product_match` |
+| (chưa commit, nhánh `feature/product-match-verification`) | Gỡ hoàn toàn Claude/Anthropic: Gemini là nhà cung cấp AI thật duy nhất |
 
 **Phát hiện quan trọng trong quá trình làm:**
 - **Lỗ hổng của B3, đã sửa ở B4:** quét `packing` một mã đã có đơn từng trả lỗi 409, nên không còn cách nào bổ sung video đóng gói cho đơn đó.
 - **Video WebM quay bằng `MediaRecorder` không ghi độ dài trong header** (`duration=N/A`). `probeVideo` giờ tính độ dài từ timestamp của packet; đã kiểm chứng với file Chrome quay thật: 3,2 s.
 - **Chrome báo hỗ trợ codec VP9 nhưng quay ra file rỗng (0 byte).** App giờ ưu tiên VP8, và không cho dùng bản quay rỗng.
-- **Backend:** 206 test pass, 3 skip (2 test gọi API thật, 1 test kiểm tra thời gian quay đang tắt).
+- **Backend:** 197 test pass, 3 skip (2 test gọi API thật, 1 test kiểm tra thời gian quay đang tắt).
 
 ---
 
@@ -140,7 +141,7 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 
 ### 5.3 Tài liệu
 
-- Cập nhật [FIXIT_AGENT_OVERVIEW.md](FIXIT_AGENT_OVERVIEW.md), hiện còn ghi Claude, 9 tool, việc đọc mã trên nhãn, phần tiền và chưa có vòng soi lại.
+- Cập nhật [FIXIT_AGENT_OVERVIEW.md](FIXIT_AGENT_OVERVIEW.md), hiện còn ghi 9 tool, việc đọc mã trên nhãn, phần tiền và chưa có vòng soi lại.
 
 ---
 

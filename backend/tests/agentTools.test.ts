@@ -1,13 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createContext, type AgentContext } from "../src/agent/agentState";
-import { executeTool, plannerToolDefinitions } from "../src/agent/toolRegistry";
+import { executeTool, plannerToolSpecs } from "../src/agent/toolRegistry";
 import { env, overrideEnv } from "../src/config/env";
 import { AuditLog } from "../src/models/AuditLog";
 import { Claim } from "../src/models/Claim";
 import { Inspection } from "../src/models/Inspection";
 import { setVisionProvider } from "../src/services/vision";
-import { aiError } from "../src/services/vision/anthropicVisionProvider";
 import { DemoVisionProvider } from "../src/services/vision/demoVisionProvider";
+import { aiError } from "../src/services/vision/errors";
 import {
     connectTestDb,
     createMediaFromFile,
@@ -61,9 +61,9 @@ const run = async (ctx: AgentContext, name: string, args: unknown = {}) => execu
 
 describe("tool registry guards", () => {
     it("exposes the planner tools with object schemas", () => {
-        const defs = plannerToolDefinitions();
+        const defs = plannerToolSpecs();
         expect(defs).toHaveLength(10);
-        for (const d of defs) expect(d.input_schema.type).toBe("object");
+        for (const d of defs) expect(d.parameters.type).toBe("object");
     });
 
     it("rejects unknown tools, invalid arguments and out-of-order calls", async () => {

@@ -1,16 +1,14 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { runInspection } from "../src/agent/fixitAgent";
 import { DeterministicPlanner } from "../src/agent/planners/deterministicPlanner";
-import { LlmPlanner, type PlannerClient } from "../src/agent/planners/llmPlanner";
 import type { Planner } from "../src/agent/planners/types";
 import { env, overrideEnv } from "../src/config/env";
 import { Claim } from "../src/models/Claim";
 import { Inspection } from "../src/models/Inspection";
 import { Order } from "../src/models/Order";
 import { setVisionProvider } from "../src/services/vision";
-import { aiError } from "../src/services/vision/anthropicVisionProvider";
 import { DemoVisionProvider } from "../src/services/vision/demoVisionProvider";
+import { aiError } from "../src/services/vision/errors";
 import type { VisionProvider } from "../src/services/vision/types";
 import {
     connectTestDb,
@@ -235,140 +233,28 @@ describe("FixIt agent with the deterministic planner (demo analysis)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// LLM planner with a scripted (mocked) Anthropic client
+// LLM planner limits (scripted planners; Gemini's own behaviour is covered in geminiPlanner.test.ts)
 // ---------------------------------------------------------------------------
 
-type Block = { type: "tool_use"; id: string; name: string; input: unknown } | { type: "text"; text: string };
-const toolUse = (id: string, name: string, input: unknown = {}): Block => ({ type: "tool_use", id, name, input });
-const reply = (...content: Block[]) => ({
-    stop_reason: content.some((b) => b.type === "tool_use") ? "tool_use" : "end_turn",
-    content,
-    model: "claude-opus-5-5",
-});
-
-const scriptedClient = (script: Array<unknown | (() => unknown)>) => {
-    const requests: Array<{ messages: unknown[]; tools: unknown[] }> = [];
-    const create = vi.fn(async (params: { messages: unknown[]; tools: unknown[] }) => {
-        requests.push(JSON.parse(JSON.stringify(params)));
-        const next = script.shift();
-        if (next === undefined) throw new Error("script exhausted");
-        return typeof next === "function" ? (next as () => unknown)() : next;
-    });
-    return { client: { beta: { messages: { create } } } as unknown as PlannerClient, requests, create };
-};
-
-describe("FixIt agent with the LLM planner (mocked client)", () => {
-    it("follows tool calls (including parallel ones), feeds back results, and stores the narrative separately", async () => {
-        spyProvider();
-        const { order, inspection } = await setup({ scenario: "mismatch", planner: "llm" });
-        await Order.updateOne(
-            { _id: order._id },
-            { $set: { customer: { name: "Pham Thi D", phone: "0933 222 111", address: "7 Tran Phu Street" } } },
-        );
-        const { client, requests } = scriptedClient([
-            reply(toolUse("t1", "lookup_order", { orderId: order.orderId })),
-            reply(toolUse("t2", "validate_evidence")),
-            reply(
-                toolUse("t3", "extract_frames", { evidenceType: "outbound" }),
-                toolUse("t4", "extract_frames", { evidenceType: "return" }),
-            ),
-            reply(
-                toolUse("t5", "analyze_item", { evidenceType: "outbound" }),
-                toolUse("t6", "analyze_item", { evidenceType: "return" }),
-            ),
-            reply(toolUse("t7", "compare_items")),
-            reply(toolUse("t7b", "verify_product_match")),
-            reply(toolUse("t8", "validate_evidence")),
-            reply(toolUse("t9", "build_claim_pack")),
-            reply({
-                type: "text",
-                text: "Model and colour differ (frames OUT-05, RET-05). Draft claim awaits review.",
-            }),
-        ]);
-        const result = await runInspection(inspection.id, { planner: new LlmPlanner(client) });
-
-        expect(result.status).toBe("completed");
-        expect(result.claimId).toBeDefined();
-        expect(result.agentNarrative).toMatch(/Draft claim awaits review/);
-        expect(result.summary).not.toEqual(result.agentNarrative);
-
-        // Tool results go back in one user message per turn, matched by tool_use id.
-        const third = requests[3].messages.at(-1) as {
-            role: string;
-            content: Array<{ type: string; tool_use_id?: string }>;
-        };
-        expect(third.role).toBe("user");
-        expect(third.content.filter((b) => b.type === "tool_result").map((b) => b.tool_use_id)).toEqual(["t3", "t4"]);
-        expect(JSON.stringify(requests)).not.toMatch(/Pham Thi D|0933|Tran Phu/);
-    });
-
-    it("feeds invalid tool arguments back as errors and lets the model correct itself", async () => {
-        spyProvider();
-        const { order, inspection } = await setup({ planner: "llm" });
-        const { client, requests } = scriptedClient([
-            reply(toolUse("bad", "lookup_order", { order: 42 })),
-            reply(toolUse("t1", "lookup_order", { orderId: order.orderId })),
-            reply({ type: "text", text: "Stopping." }),
-        ]);
-        const result = await runInspection(inspection.id, { planner: new LlmPlanner(client) });
-        const feedback = requests[1].messages.at(-1) as { content: Array<{ is_error?: boolean; content?: string }> };
-        expect(feedback.content[0].is_error).toBe(true);
-        expect(feedback.content[0].content).toMatch(/INVALID_ARGUMENTS/);
-        // Model quit early: the guardrail escalates instead of reporting success.
-        expect(result.status).toBe("needs_review");
-        expect(result.escalation?.reasons).toContain("WORKFLOW_ERROR");
-    });
-
-    it("blocks attempts to skip verification steps", async () => {
-        spyProvider();
-        const { inspection } = await setup({ scenario: "mismatch", planner: "llm" });
-        const { client, requests } = scriptedClient([
-            reply(toolUse("skip", "build_claim_pack")),
-            reply({ type: "text", text: "Claim submitted." }),
-        ]);
-        const result = await runInspection(inspection.id, { planner: new LlmPlanner(client) });
-        const feedback = requests[1].messages.at(-1) as { content: Array<{ content?: string }> };
-        expect(feedback.content[0].content).toMatch(/TOOL_NOT_PERMITTED/);
-        expect(result.claimId).toBeUndefined();
-        expect(result.status).toBe("needs_review");
-    });
-
-    it("falls back to the deterministic planner when the AI API times out", async () => {
-        spyProvider();
-        const { inspection } = await setup({ scenario: "missing_item", expectedQuantity: 2, planner: "llm" });
-        const { client } = scriptedClient([
-            () => {
-                throw new Anthropic.APIConnectionTimeoutError();
-            },
-        ]);
-        const result = await runInspection(inspection.id, { planner: new LlmPlanner(client) });
-        expect(result.plannerFallback).toBe(true);
-        expect(
-            result.agentLog.some((l) => l.kind === "guardrail" && /deterministic planner/.test(l.message ?? "")),
-        ).toBe(true);
-        expect(result.status).toBe("completed");
-        expect(result.claimId).toBeDefined();
-    });
-
-    it("falls back when the planner response is malformed", async () => {
-        spyProvider();
-        const { inspection } = await setup({ planner: "llm" });
-        const { client } = scriptedClient([{ stop_reason: "end_turn", content: "not-an-array" }]);
-        const result = await runInspection(inspection.id, { planner: new LlmPlanner(client) });
-        expect(result.plannerFallback).toBe(true);
-        expect(result.status).toBe("completed");
-    });
-
+describe("FixIt agent with an LLM planner", () => {
     it("stops at the iteration limit when the model loops", async () => {
         spyProvider();
         overrideEnv({ AGENT_MAX_ITERATIONS: 4 });
         const { order, inspection } = await setup({ planner: "llm" });
-        const looping = Array.from({ length: 10 }, (_, i) =>
-            reply(toolUse(`l${i}`, "lookup_order", { orderId: order.orderId })),
-        );
-        const { client, create } = scriptedClient(looping);
-        const result = await runInspection(inspection.id, { planner: new LlmPlanner(client) });
-        expect(create).toHaveBeenCalledTimes(4);
+        let turns = 0;
+        const looping: Planner = {
+            kind: "llm",
+            name: "gemini",
+            next: async () => {
+                turns++;
+                return {
+                    type: "tool_calls",
+                    calls: [{ id: `l${turns}`, name: "lookup_order", args: { orderId: order.orderId } }],
+                };
+            },
+        };
+        const result = await runInspection(inspection.id, { planner: looping });
+        expect(turns).toBe(4);
         expect(result.agentLog.some((l) => /Iteration limit/.test(l.message ?? ""))).toBe(true);
         expect(result.status).toBe("needs_review");
     });

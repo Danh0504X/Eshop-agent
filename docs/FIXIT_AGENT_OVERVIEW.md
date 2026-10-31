@@ -53,7 +53,7 @@ Nguyên tắc xuyên suốt:
 | Xác thực & phân quyền | JWT, vai trò `owner` / `employee`, cô lập theo shop và kho ở backend | `authService.ts`, `accessService.ts` |
 | Upload video | Kiểm tra MIME + đuôi + magic bytes, tên file ngẫu nhiên, hash SHA-256, không ghi đè âm thầm | `mediaService.ts` |
 | Xử lý video (FFmpeg) | Đo thời lượng, trích frame, đo độ sáng/độ nét, kiểm tra tính liên tục | `ffmpegService.ts`, `videoProcessingService.ts` |
-| Phân tích hình ảnh bằng AI | Claude (structured output) + chế độ DEMO có nhãn rõ ràng | `services/vision/` |
+| Phân tích hình ảnh bằng AI | Gemini (JSON có cấu trúc) + chế độ DEMO có nhãn rõ ràng | `services/vision/` |
 | So sánh 2 video | Quy tắc cố định, có mức độ nghiêm trọng, confidence, frame làm căn cứ | `comparisonService.ts` |
 | Kiểm tra bằng chứng & chuyển cho người | 14 mã lý do, chia "chặn kết luận" và "chỉ cần người xem" | `evidenceValidationService.ts` |
 | AI Agent | State machine, 9 tool có kiểm tra tham số, 2 planner (LLM / cố định), guardrail, giới hạn vòng lặp | `backend/src/agent/` |
@@ -74,9 +74,9 @@ Nguyên tắc xuyên suốt:
 |---|---|---|
 | Script retention (`npm run retention`) | ❌ Chưa có | `package.json` đã khai báo lệnh nhưng file `scripts/retention.ts` chưa tồn tại; `RETENTION_SWEEP_HOURS` chưa có tác dụng. (Xóa bằng chứng thủ công bởi chủ shop đã có.) |
 | README đầy đủ | ❌ Chưa có | Cài đặt, chạy, test, xử lý sự cố, cài FFmpeg cho Windows/macOS/Linux, hướng dẫn demo |
-| Chạy AI thật với API key | ⚠️ Chưa kiểm chứng | Code đã test bằng client giả lập; chưa từng gọi API Anthropic thật vì chưa có key |
+| Chạy AI thật với API key | ⚠️ Chưa kiểm chứng đủ | Đã gọi Gemini thật với frame tổng hợp để kiểm tra định dạng đầu ra; độ chính xác trên video thật chưa đo |
 | Ghi nhận token usage / chi phí thật | ❌ Chưa có | Chi phí ở mục 12 chỉ là ước tính |
-| Nhà cung cấp AI khác (Gemini miễn phí) | ❌ Mới thảo luận | Kiến trúc đã sẵn interface `VisionProvider` để thêm |
+| Nhà cung cấp AI khác ngoài Gemini | ❌ Không có | Kiến trúc đã sẵn interface `VisionProvider` để thêm |
 | Chọn frame theo thay đổi cảnh | ❌ Mới đề xuất | Hiện lấy 8 frame chia đều theo thời gian |
 | Nhận diện & làm mờ khuôn mặt tự động | ❌ Không có | Chỉ làm mờ frame mà AI đánh dấu; báo cáo luôn ghi "chưa ẩn danh hoàn toàn" |
 | Test frontend / kiểm thử bấm nút trên trình duyệt | ⚠️ Chưa có | Frontend đã build và chạy qua proxy, chưa có test tự động |
@@ -106,7 +106,7 @@ Nguyên tắc xuyên suốt:
                                      └───────┬──────────────┬──────────────┬────────────────────┘
                                              │              │              │
                                       MongoDB (Mongoose)  FFmpeg/ffprobe  Vision Provider
-                                                          (execFile)     (Claude | Demo)
+                                                          (execFile)     (Gemini | Demo)
                                              │
                                       Local storage (uploads/: video, frame, PDF)
 ```
@@ -121,7 +121,7 @@ backend/src/
 │  ├─ toolRegistry.ts        # Cổng thực thi tool duy nhất
 │  ├─ prompts.ts             # Prompt cho vision và planner
 │  ├─ schemas.ts             # Schema kết quả phân tích ảnh + hậu kiểm
-│  ├─ planners/              # llmPlanner.ts, deterministicPlanner.ts
+│  ├─ planners/              # geminiPlanner.ts, deterministicPlanner.ts
 │  └─ tools/                 # 9 tool
 ├─ services/                 # Logic nghiệp vụ (so sánh, kiểm tra bằng chứng, claim, PDF, FFmpeg, ...)
 ├─ models/ routes/ controllers/ middleware/ validators/ config/ utils/ docs/
@@ -169,7 +169,7 @@ Quy tắc phân quyền: đơn của **shop khác** → `404` (không lộ việ
 
 | Lớp | Vai trò | Thực hiện bởi |
 |---|---|---|
-| **Planner** | *Đề xuất* tool tiếp theo | Code cố định (`deterministic`) hoặc Claude (`llm`) |
+| **Planner** | *Đề xuất* tool tiếp theo | Code cố định (`deterministic`) hoặc Gemini (`llm`) |
 | **Tool Registry** | *Gác cổng*: tool có tồn tại? được phép ở trạng thái này? tham số hợp lệ? quá số lần thử? | Code (`toolRegistry.ts`) |
 | **Tools** | *Thực thi*: đọc DB, chạy FFmpeg, gọi AI nhìn ảnh, so sánh, tạo claim | Code; chỉ `analyze_item` gọi AI |
 
@@ -179,7 +179,7 @@ Mỗi vòng: Planner đề xuất → Registry kiểm tra → Tool chạy → l�
 
 | | `AGENT_PLANNER=deterministic` | `AGENT_PLANNER=llm` (mặc định khi AI thật) |
 |---|---|---|
-| Ai chọn bước | Quy tắc `if/else` trong `deterministicPlanner.ts` | Claude (tool use, vòng lặp thủ công, lịch sử append-only) |
+| Ai chọn bước | Quy tắc `if/else` trong `deterministicPlanner.ts` | Gemini (function calling, vòng lặp thủ công, lịch sử append-only) |
 | Lượt gọi AI / lần kiểm tra | 2 (chỉ phân tích ảnh) | ≈ 11 (≈ 9 planner + 2 ảnh) |
 | Đoạn tóm tắt tự viết | Không | Có (`agentNarrative`, chỉ để tham khảo) |
 | Khi nào dùng | DEMO luôn dùng; khuyến nghị cho AI thật | Khi cần linh hoạt / tóm tắt tự nhiên |
@@ -251,7 +251,7 @@ Gọi sai thứ tự → lỗi `TOOL_NOT_PERMITTED`, tool **không chạy**. M�
 | Số vòng tối đa | `AGENT_MAX_ITERATIONS` = 20 |
 | Thời gian tối đa cả lần chạy | `AGENT_TIMEOUT_MS` = 15 phút |
 | Timeout mỗi tool | `AGENT_TOOL_TIMEOUT_MS` = 5 phút |
-| Timeout mỗi lần gọi planner | `AI_TIMEOUT_MS × (AI_MAX_RETRIES + 1) + 5 s` |
+| Timeout mỗi lần gọi planner | Thời gian còn lại của cả lần chạy (`AGENT_TIMEOUT_MS`) |
 
 ### 5.7. Guardrail sau khi planner dừng
 
@@ -341,13 +341,13 @@ Ngay khi cả 2 video đã trích frame (`extract_frames`), backend chạy kiể
 
 ### 6.4. [D] Phân tích hình ảnh bằng AI
 
-**Đầu vào gửi cho model** (`anthropicVisionProvider.ts`, `visionService.ts`):
+**Đầu vào gửi cho model** (`geminiVisionProvider.ts`, `visionService.ts`):
 
 - Tối đa `MAX_FRAMES_PER_ANALYSIS` = 8 frame (ưu tiên frame đạt chất lượng nếu có nhiều hơn), mỗi frame có nhãn `Frame RET-05 at t=3.4s`.
 - Danh sách cần kiểm: tên/mô tả sản phẩm, số lượng mong đợi, phụ kiện mong đợi.
 - **Không gửi**: cả video, tên/SĐT/địa chỉ khách, mã đơn, mã vận đơn.
 
-**Cấu hình gọi**: model `AI_MODEL` (mặc định `claude-opus-5-5`), adaptive thinking, `effort` = `AI_EFFORT` (mặc định `high`), structured output theo schema Zod, fallback phía server khi model từ chối (`AI_REFUSAL_FALLBACK`), timeout 120 s, SDK tự thử lại 2 lần.
+**Cấu hình gọi**: model `GEMINI_VISION_MODEL` (mặc định `gemini-3.8-flash`), mức suy nghĩ `GEMINI_THINKING_LEVEL`, JSON có cấu trúc theo schema, timeout `AI_TIMEOUT_MS` = 180 s mỗi lần gọi, tự thử lại khi gặp lỗi 429/503 (`AI_RETRY_MAX_ATTEMPTS` = 3).
 
 **Prompt quy định model** (`prompts.ts` → `VISION_SYSTEM_PROMPT`):
 
@@ -567,8 +567,9 @@ Tài khoản dev (mật khẩu `dev-password-change-me`): `owner@demo-shop.test`
 | Biến | Mặc định | Ý nghĩa |
 |---|---|---|
 | `DEMO_MODE` | `false` (file `.env.example` đặt `true`) | `true` = dùng kết quả demo, không gọi AI |
-| `AI_PROVIDER` / `AI_API_KEY` / `AI_MODEL` | `anthropic` / — / `claude-opus-5-5` | Bắt buộc có key khi `DEMO_MODE=false` |
-| `AI_EFFORT` | `high` | Mức suy nghĩ của model |
+| `AI_PROVIDER` / `GEMINI_API_KEY` | `gemini` / — | Bắt buộc có key khi `DEMO_MODE=false` |
+| `GEMINI_VISION_MODEL` / `GEMINI_PLANNER_MODEL` | `gemini-3.8-flash` | Model phân tích ảnh / model planner |
+| `GEMINI_THINKING_LEVEL` | (mặc định của model) | Mức suy nghĩ: `LOW`, `MEDIUM`, `HIGH` |
 | `AGENT_PLANNER` | `llm` | `deterministic` = quy trình cố định (khuyến nghị, rẻ hơn) |
 | `CONFIDENCE_THRESHOLD` | `0.7` | Dưới ngưỡng → chuyển cho người |
 | `HIGH_VALUE_THRESHOLD` | `500` | Từ ngưỡng → bắt buộc review |
@@ -581,16 +582,7 @@ Tài khoản dev (mật khẩu `dev-password-change-me`): `owner@demo-shop.test`
 
 ## 12. Chi phí AI ước tính
 
-> **Ước tính**, chưa đo thực tế (app chưa ghi token usage). Đơn giá theo bảng giá Anthropic (06/10/2026): Opus 5.5 $4 / $20, Sonnet 5.5 $2 / $10, Haiku 5.5 $0,10 / $0,50 mỗi triệu token input / output. Cần đối chiếu trang giá chính thức.
-
-Kích thước đo từ code: prompt vision ≈ 550 token, schema ≈ 957, text ≈ 128; frame 1024×576 ≈ 786 token → **≈ 7.900 token input mỗi video**; output (JSON + suy nghĩ) ≈ 2.000–4.500.
-
-| Cấu hình (1 lần kiểm tra = 2 video) | Opus 5.5 | Sonnet 5.5 | Haiku 5.5 |
-|---|---|---|---|
-| AI phân tích ảnh + planner cố định | ≈ $0,14–0,24 | ≈ $0,07–0,12 | ≈ $0,005 |
-| AI phân tích ảnh + planner LLM | ≈ $0,40–0,60 | ≈ $0,20–0,30 | ≈ $0,02 |
-
-Trường hợp xấu (thử lại tối đa) có thể gấp ≈ 3 lần phần phân tích ảnh. DEMO_MODE: $0.
+Chưa có ước tính chi phí cho Gemini. Bảng ước tính cũ tính theo giá Claude nên đã được bỏ khi gỡ nhà cung cấp này. Số lượt AI của mỗi lần kiểm tra xem ở mục 5.2. DEMO_MODE: $0.
 
 ---
 
@@ -603,6 +595,7 @@ Trường hợp xấu (thử lại tối đa) có thể gấp ≈ 3 lần phần
 3. Ghi token usage mỗi lần gọi AI → đo chi phí thật.
 4. Chạy thử AI thật với video kho thật; hiệu chỉnh ngưỡng chất lượng.
 5. Chọn frame theo thay đổi cảnh.
-6. (Tùy chọn) Provider Gemini — lưu ý gói miễn phí có thể dùng dữ liệu gửi lên để cải thiện sản phẩm; chỉ nên thử với dữ liệu không nhạy cảm.
+
+**Lưu ý với Gemini**: gói miễn phí có thể dùng dữ liệu gửi lên để cải thiện sản phẩm; chỉ nên thử với dữ liệu không nhạy cảm.
 
 **Giới hạn của MVP**: hàng đợi 1 instance; lưu file cục bộ; không nhận diện khuôn mặt; không quản lý người dùng qua API; JWT lưu trong `localStorage` (không refresh token); chưa đo độ chính xác trên dữ liệu gán nhãn.

@@ -74,7 +74,7 @@ export interface AgentContext {
     segmentInspections: SegmentInspectionRecord[];
     budget: BudgetUsage;
     /** Planner currently proposing actions; recorded on every tool log entry. */
-    plannerName?: "gemini" | "anthropic" | "deterministic";
+    plannerName?: "gemini" | "deterministic";
 }
 
 export const createContext = (inspection: InspectionDoc, principal: AuthPrincipal): AgentContext => ({
