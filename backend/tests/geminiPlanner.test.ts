@@ -223,14 +223,16 @@ describe("GeminiPlanner function calling", () => {
     });
 });
 
+/** A timeout is retried inside callGemini, so one logical request uses up this many scripted steps. */
+const everyAttemptTimesOut = () =>
+    Array.from({ length: env.AI_RETRY_MAX_ATTEMPTS }, () => () => {
+        throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    });
+
 describe("GeminiPlanner failures fall back safely and visibly", () => {
     it("falls back to the deterministic planner on timeout and records it", async () => {
         const { inspection } = await setup({ scenario: "missing_item" });
-        const { client } = scriptedGemini([
-            () => {
-                throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
-            },
-        ]);
+        const { client } = scriptedGemini(everyAttemptTimesOut());
         const result = await runInspection(inspection.id, { planner: new GeminiPlanner(client) });
         expect(result.plannerFallback).toBe(true);
         expect(
@@ -292,11 +294,7 @@ describe("decision trace and provenance", () => {
     it("labels every post-fallback decision as deterministic and records why", async () => {
         const { inspection } = await setup();
         await Inspection.updateOne({ _id: inspection._id }, { $set: { analysisMode: "real" } });
-        const { client } = scriptedGemini([
-            () => {
-                throw Object.assign(new Error("aborted due to timeout"), { name: "TimeoutError" });
-            },
-        ]);
+        const { client } = scriptedGemini(everyAttemptTimesOut());
         const result = await runInspection(inspection.id, { planner: new GeminiPlanner(client) });
 
         const failure = result.agentLog.find((l) => l.kind === "error");

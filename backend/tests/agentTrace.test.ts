@@ -115,7 +115,7 @@ describe("console trace of the two-video check", () => {
                 ],
                 usageMetadata: { promptTokenCount: 900, candidatesTokenCount: 40, thoughtsTokenCount: 120 },
             })
-            .mockRejectedValueOnce(Object.assign(new Error("aborted due to timeout"), { name: "TimeoutError" }));
+            .mockRejectedValue(Object.assign(new Error("aborted due to timeout"), { name: "TimeoutError" }));
         const client = { models: { generateContent } } as unknown as GeminiModelsClient;
         await runInspection(inspection.id, { planner: new GeminiPlanner(client) });
         const out = text();

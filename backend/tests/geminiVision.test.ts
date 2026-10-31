@@ -57,9 +57,19 @@ const geminiResponse = (text: string | undefined, finishReason: FinishReason = F
     ...extra,
 });
 
+/** Vision requests are streamed; `generateContent` here records each request and supplies its only chunk. */
 const fakeClient = (impl: () => unknown) => {
     const generateContent = vi.fn(async (..._args: unknown[]) => impl());
-    return { client: { models: { generateContent } } as unknown as GeminiModelsClient, generateContent };
+    const generateContentStream = vi.fn(async (...args: unknown[]) => {
+        const chunk = await generateContent(...args);
+        return (async function* () {
+            yield chunk;
+        })();
+    });
+    return {
+        client: { models: { generateContent, generateContentStream } } as unknown as GeminiModelsClient,
+        generateContent,
+    };
 };
 
 describe("GeminiVisionProvider (mocked client)", () => {
@@ -69,7 +79,13 @@ describe("GeminiVisionProvider (mocked client)", () => {
 
         expect(result.analysis.packageContents).toBe("items_present");
         expect(result.model).toBe("gemini-test-model");
-        expect(result.usage).toEqual({ promptTokens: 1200, outputTokens: 300, thoughtsTokens: 150, apiAttempts: 1 });
+        expect(result.usage).toEqual({
+            promptTokens: 1200,
+            outputTokens: 300,
+            thoughtsTokens: 150,
+            apiAttempts: 1,
+            firstChunkMs: expect.any(Number),
+        });
 
         const params = generateContent.mock.calls[0][0] as unknown as {
             model: string;
@@ -158,9 +174,9 @@ describe("GeminiVisionProvider (mocked client)", () => {
         });
     });
 
-    it("classifies API errors: persistent 429/503 are final, timeouts and 500 retry, bad key and unknown model do not", async () => {
+    it("classifies API errors: persistent 429/503/504 and timeouts are final, 500 retries, bad key and unknown model do not", async () => {
         const cases: Array<[unknown, RegExp, boolean]> = [
-            // 429/503 are retried with backoff inside the provider; if they persist the error is final.
+            // These are retried with backoff inside the provider; if they persist the error is final.
             [
                 new GenAiApiError({ message: "quota", status: 429 }),
                 /rate limit or quota \(429\) persisted after 3 attempt/,
@@ -171,6 +187,11 @@ describe("GeminiVisionProvider (mocked client)", () => {
                 /service unavailable \(503\) persisted after 3/,
                 false,
             ],
+            [
+                new GenAiApiError({ message: "gateway", status: 504 }),
+                /gateway timeout \(504\) persisted after 3/,
+                false,
+            ],
             [new GenAiApiError({ message: "internal", status: 500 }), /service error/, true],
             [new GenAiApiError({ message: "bad key", status: 403 }), /API key/, false],
             [new GenAiApiError({ message: "no model", status: 404 }), /gemini:models/, false],
@@ -178,8 +199,8 @@ describe("GeminiVisionProvider (mocked client)", () => {
             [new GenAiApiError({ message: "odd", status: 418 }), /Gemini error \(418\): odd/, false],
             [
                 Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }),
-                /timed out/,
-                true,
+                /request timed out persisted after 3/,
+                false,
             ],
             [new TypeError("fetch failed"), /could not reach/, true],
         ];

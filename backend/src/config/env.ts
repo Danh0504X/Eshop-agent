@@ -36,7 +36,7 @@ const EnvSchema = z
             (v) => (v === "" ? undefined : v),
             z.enum(["LOW", "MEDIUM", "HIGH"]).optional(),
         ),
-        // Transport-level backoff for 429/503 only (full jitter, honours Google's RetryInfo).
+        // Transport-level backoff for 429/503/504 and timeouts (full jitter, honours Google's RetryInfo).
         // Reuse a good analysis of an unchanged video when an inspection runs again (see visionService).
         AI_ANALYSIS_CACHE: bool(true),
         AI_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(6).default(3),
@@ -44,6 +44,8 @@ const EnvSchema = z
         AI_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(0).default(30_000),
         // Per HTTP attempt; shortened automatically to fit the remaining tool/inspection budget.
         AI_TIMEOUT_MS: z.coerce.number().int().positive().default(180_000),
+        // Streamed vision requests: give up on an attempt and retry if Gemini sends nothing for this long.
+        AI_FIRST_CHUNK_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
         AGENT_PLANNER: z.enum(["llm", "deterministic"]).default("llm"),
         AGENT_MAX_ITERATIONS: z.coerce.number().int().min(3).max(50).default(20),
         AGENT_TIMEOUT_MS: z.coerce

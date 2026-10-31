@@ -86,7 +86,7 @@ export class GeminiVisionProvider implements VisionProvider {
             },
         ];
         this.client ??= createGeminiClient();
-        const { response, attempts } = await callGemini(
+        const { response, attempts, firstChunkMs } = await callGemini(
             this.client,
             {
                 model: env.GEMINI_VISION_MODEL,
@@ -97,12 +97,12 @@ export class GeminiVisionProvider implements VisionProvider {
                     responseJsonSchema: ANALYSIS_SCHEMA,
                 },
             },
-            { label: `${LABEL} (${request.evidenceType})`, deadlineMs: request.deadlineMs },
+            { label: `${LABEL} (${request.evidenceType})`, deadlineMs: request.deadlineMs, stream: true },
         );
         return {
             analysis: parseStructured(response, VisionAnalysisSchema),
             model: response.modelVersion ?? env.GEMINI_VISION_MODEL,
-            usage: usageOf(response, attempts),
+            usage: usageOf(response, attempts, firstChunkMs),
         };
     }
 
@@ -120,7 +120,7 @@ export class GeminiVisionProvider implements VisionProvider {
             },
         ];
         this.client ??= createGeminiClient();
-        const { response, attempts } = await callGemini(
+        const { response, attempts, firstChunkMs } = await callGemini(
             this.client,
             {
                 model: env.GEMINI_VISION_MODEL,
@@ -131,12 +131,12 @@ export class GeminiVisionProvider implements VisionProvider {
                     responseJsonSchema: PRODUCT_MATCH_SCHEMA,
                 },
             },
-            { label: `${LABEL} (product match)`, deadlineMs: request.deadlineMs },
+            { label: `${LABEL} (product match)`, deadlineMs: request.deadlineMs, stream: true },
         );
         return {
             match: parseStructured(response, ProductMatchSchema),
             model: response.modelVersion ?? env.GEMINI_VISION_MODEL,
-            usage: usageOf(response, attempts),
+            usage: usageOf(response, attempts, firstChunkMs),
         };
     }
 
@@ -155,7 +155,7 @@ export class GeminiVisionProvider implements VisionProvider {
             },
         ];
         this.client ??= createGeminiClient();
-        const { response, attempts } = await callGemini(
+        const { response, attempts, firstChunkMs } = await callGemini(
             this.client,
             {
                 model: env.GEMINI_VISION_MODEL,
@@ -166,12 +166,12 @@ export class GeminiVisionProvider implements VisionProvider {
                     responseJsonSchema: SEGMENT_SCHEMA,
                 },
             },
-            { label: `${LABEL} (${request.evidenceType})`, deadlineMs: request.deadlineMs },
+            { label: `${LABEL} (${request.evidenceType})`, deadlineMs: request.deadlineMs, stream: true },
         );
         return {
             observation: parseStructured(response, SegmentObservationSchema),
             model: response.modelVersion ?? env.GEMINI_VISION_MODEL,
-            usage: usageOf(response, attempts),
+            usage: usageOf(response, attempts, firstChunkMs),
         };
     }
 }
