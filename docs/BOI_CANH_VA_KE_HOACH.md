@@ -1,6 +1,6 @@
 # FixIt AI Agent — Bối cảnh, nhật ký và hướng đi
 
-> Cập nhật: 31/10/2026 · Nhánh: `feature/scan-first-flow` (tách từ `development`).
+> Cập nhật: 31/10/2026 · Nhánh: `feature/web-claims-report` (tách từ `feature/product-match-verification`).
 > Đây là tài liệu sống: cập nhật sau mỗi phase. Chi tiết kỹ thuật của từng thay đổi nằm ở [CHANGELOG_AGENT.md](CHANGELOG_AGENT.md).
 > Lưu ý: [FIXIT_AGENT_OVERVIEW.md](FIXIT_AGENT_OVERVIEW.md) viết trước đợt thiết kế lại này nên **đã lỗi thời** ở nhiều chỗ (xem mục 6).
 
@@ -99,6 +99,7 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 | `27ce961` | Giữ lời giải thích của Google trong lỗi 402 và các lỗi client khác của Gemini |
 | (chưa commit, nhánh `feature/product-match-verification`) | Agent: sửa lỗi bất đối xứng tên sản phẩm theo 3 lớp, thêm tool `verify_product_match` |
 | (chưa commit, nhánh `feature/product-match-verification`) | Gỡ hoàn toàn Claude/Anthropic: Gemini là nhà cung cấp AI thật duy nhất |
+| (chưa commit, nhánh `feature/web-claims-report`) | `web/`: trang Khiếu nại (danh sách, chi tiết, duyệt / từ chối / ghi nhận đã gửi / đã xong), xem và tải báo cáo PDF, thay video, xóa video, lịch sử các lần kiểm tra, lọc đơn theo trạng thái |
 
 **Phát hiện quan trọng trong quá trình làm:**
 - **Lỗ hổng của B3, đã sửa ở B4:** quét `packing` một mã đã có đơn từng trả lỗi 409, nên không còn cách nào bổ sung video đóng gói cho đơn đó.
@@ -136,8 +137,10 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 |---|---|
 | 9 | **Xong:** danh sách đơn, chi tiết đơn kèm video, thẻ kết quả kiểm tra |
 | 10 | **Xong:** Nhận hàng hoàn; nút Kiểm tra bằng AI → tiến trình → kết quả. **Chưa chạy với Gemini thật** |
-| 11 | Khiếu nại: danh sách, chi tiết, PDF, duyệt / từ chối |
+| 11 | **Xong:** Khiếu nại: danh sách, chi tiết, PDF, duyệt / từ chối. Đã chạy thử trên trình duyệt ở chế độ demo, **chưa chạy với Gemini thật** |
 | 12 | `web/README.md` + cập nhật tài liệu |
+
+**Backend đã có nhưng `web/` chưa làm:** xem lại video cũ đã bị thay (`GET /orders/:id/media?includeInactive=true`).
 
 ### 5.3 Tài liệu
 
@@ -168,3 +171,5 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 1. Lần chạy Gemini thật sắp tới dùng video thật hay video seed?
 2. Đề bài cuộc thi có bắt buộc phát hiện "thiếu / sai mã đơn" **từ nội dung video** không? (Hiện đã bỏ, thay bằng kiểm tra ở bước quét.)
 3. Bản dự thi dùng planner nào: `deterministic`, `llm` hay `hybrid`?
+4. **Kiểm tra lại khi khiếu nại cũ còn chờ duyệt:** với lần kiểm tra `completed`, `startInspection` tạo lần mới nên một đơn có thể có **2 khiếu nại cùng "Chờ duyệt"** (đã thấy khi chạy thử). Quy tắc chặn trong `retryInspection` chỉ áp dụng cho `failed` / `needs_review`. Có nên chặn cả ở `startInspection` không?
+5. **Báo cáo PDF viết bằng tiếng Anh**, và font chuẩn của PDF làm mất dấu tiếng Việt (`toLatin1`). Bản dự thi có cần báo cáo tiếng Việt không? (Cần nhúng font Unicode vào `reportService`.)
