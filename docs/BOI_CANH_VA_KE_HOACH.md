@@ -1,6 +1,6 @@
 # FixIt AI Agent — Bối cảnh, nhật ký và hướng đi
 
-> Cập nhật: 31/10/2026 · Nhánh: `feature/web-claims-report` (tách từ `feature/product-match-verification`).
+> Cập nhật: 31/10/2026 · Nhánh: `feature/gemini-resilience` (tách từ `feature/web-claims-report`).
 > Đây là tài liệu sống: cập nhật sau mỗi phase. Chi tiết kỹ thuật của từng thay đổi nằm ở [CHANGELOG_AGENT.md](CHANGELOG_AGENT.md).
 > Lưu ý: [FIXIT_AGENT_OVERVIEW.md](FIXIT_AGENT_OVERVIEW.md) viết trước đợt thiết kế lại này nên **đã lỗi thời** ở nhiều chỗ (xem mục 6).
 
@@ -99,7 +99,8 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 | `27ce961` | Giữ lời giải thích của Google trong lỗi 402 và các lỗi client khác của Gemini |
 | (chưa commit, nhánh `feature/product-match-verification`) | Agent: sửa lỗi bất đối xứng tên sản phẩm theo 3 lớp, thêm tool `verify_product_match` |
 | (chưa commit, nhánh `feature/product-match-verification`) | Gỡ hoàn toàn Claude/Anthropic: Gemini là nhà cung cấp AI thật duy nhất |
-| (chưa commit, nhánh `feature/web-claims-report`) | `web/`: trang Khiếu nại (danh sách, chi tiết, duyệt / từ chối / ghi nhận đã gửi / đã xong), xem và tải báo cáo PDF, thay video, xóa video, lịch sử các lần kiểm tra, lọc đơn theo trạng thái |
+| `01c1adf`, `4729814`, `40cc27c` | `web/`: trang Khiếu nại (danh sách, chi tiết, duyệt / từ chối / ghi nhận đã gửi / đã xong), xem và tải báo cáo PDF, thay video, xóa video, lịch sử các lần kiểm tra, lọc đơn theo trạng thái |
+| (chưa commit, nhánh `feature/gemini-resilience`) | Gọi Gemini: tự thử lại khi timeout và 504, streaming cho các lượt phân tích hình để bỏ sớm yêu cầu bị kẹt (`AI_FIRST_CHUNK_TIMEOUT_MS`) |
 
 **Phát hiện quan trọng trong quá trình làm:**
 - **Lỗ hổng của B3, đã sửa ở B4:** quét `packing` một mã đã có đơn từng trả lỗi 409, nên không còn cách nào bổ sung video đóng gói cho đơn đó.
@@ -125,6 +126,9 @@ Luồng **mặc định** (`AGENT_PLANNER=deterministic`, `AI_PROVIDER=gemini`) 
 3. **Giảm chi phí AI:**
    - **Xong:** thinking level `LOW`, không gửi frame tối hoặc mờ, dùng lại kết quả khi kiểm tra lại
    - **Còn lại:** dừng sớm nếu video đóng gói đã dính lỗi chặn
+   - **Timeout Gemini (số liệu 31/10/2026):** 44 lượt `analyze_item` thật có 26 lượt lỗi, trong đó 11 timeout phía app và 6 lỗi 504; mạng và kích thước ảnh không phải nguyên nhân.
+   - **Đo model (31/10/2026, 3 lượt mỗi model, tắt tự thử lại, chưa đo `gemini-3.8-flash` cùng lúc):** `gemini-3.5-flash-lite` 3/3 thành công trong 4,5–5,9 giây nhưng đọc nhầm board vi điều khiển thành `display module` với độ tin cậy 1,0; `gemini-3.5-flash` và `gemini-3.7-flash` mỗi model 2/3 lượt lỗi 503, 2 lượt thành công mất 37 và 80 giây. **Chưa đổi model:** vẫn dùng `gemini-3.8-flash`.
+   - **Tăng độ bền khi gọi Gemini: code xong, chưa đo được hiệu quả.** Lần đo lại 31/10/2026: 6/6 yêu cầu lỗi vì 429 kéo dài, nên **chưa có phản hồi streaming thật nào được đọc thành công**. Mức 90 giây của `AI_FIRST_CHUNK_TIMEOUT_MS` mới là giá trị đặt thử. Khi hết 429, xem `firstChunkMs` trong `usage` của các lần kiểm tra để chỉnh mức này.
 4. **Planner hybrid:** code chạy các bước bắt buộc 1–7; chỉ gọi Gemini planner khi kết quả so sánh còn điểm chưa rõ. Ca rõ ràng chỉ tốn 2 lượt AI.
 5. **Cân nhắc sau:**
    - bật lại kiểm tra thời gian quay

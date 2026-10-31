@@ -406,3 +406,18 @@ Each phase is one small, tested unit. Test counts are from actual runs of `npm t
   - Older entries in this changelog still describe Anthropic as it was at the time.
 - **Tests executed:** typecheck OK; `npm test` 197 passed, 3 skipped; backend build OK; `web/` typecheck OK; Prettier OK on every changed file. The count drops by 9: 4 Claude vision tests and 5 Claude planner tests already covered by `geminiVision.test.ts` and `geminiPlanner.test.ts`. The iteration-limit test now uses a scripted planner, and the check that the narrative stays separate from the summary moved to `geminiPlanner.test.ts`. **No real Gemini call was made for this change.**
 - **Suggested Git commit:** `refactor(agent): remove the Anthropic provider and keep Gemini only`
+
+## Gemini resilience — retry timeouts and 504, stream vision requests
+
+- **Files changed:** `backend/src/services/ai/gemini.ts`, `backend/src/services/vision/geminiVisionProvider.ts`, `backend/src/config/env.ts`, `backend/.env.example`, `backend/tests/geminiStream.test.ts` (new), `backend/tests/geminiVision.test.ts`, `backend/tests/segmentVision.test.ts`, `backend/tests/geminiPlanner.test.ts`, `backend/tests/agentTrace.test.ts`, `backend/tests/retry.test.ts`, `docs/BOI_CANH_VA_KE_HOACH.md`
+- **Previous behavior:** only 429 and 503 were retried inside `callGemini`. A timeout or a 504 cost a full 180 s attempt, then went back to the agent as a failed tool call.
+- **New behavior:**
+  - `callGemini` also retries 504 and timeouts, using the same backoff and `AI_RETRY_MAX_ATTEMPTS`. If they persist the error is final, like 429/503, so tool retries do not multiply them.
+  - Vision requests (`analyze_item`, `verify_product_match`, `inspect_video_segment`) are streamed. An attempt with no chunk within `AI_FIRST_CHUNK_TIMEOUT_MS` (default 90 s, not yet tuned on real data) is given up and retried. A reply that has started is only limited by `AI_TIMEOUT_MS`.
+  - The planner is not streamed: its turns are sent back verbatim with their thought signatures. It does get the new retries.
+  - A persistent 429 now keeps Google's explanation, so the error says which limit was hit.
+  - Trace: a `first chunk after Xs` line, and retry lines that name the reason. `usage.firstChunkMs` is stored with each vision result.
+- **Compatibility impact:** a timeout that persists now ends in human review after 3 attempts within the tool budget, instead of several tool retries of 180 s each. Network failures such as `fetch failed` still retry at tool level, as before.
+- **Tests executed:** typecheck OK; `npm test` 210 passed, 3 skipped; Prettier OK on every changed file. `geminiStream.test.ts` drives the real SDK against a local HTTP server: stall before and after the headers, stall mid-reply, 504, persistent failures.
+- **Real Gemini run:** 6 requests with `gemini-3.8-flash`, **all failed**. One attempt hit the first-chunk limit and was retried as designed; then 429 on every remaining attempt. **No streamed reply from real Gemini has been parsed yet, and the effect on failure rate is not measured.**
+- **Suggested Git commit:** `feat(ai): retry Gemini timeouts and 504, stream vision requests to detect stuck calls`
