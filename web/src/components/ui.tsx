@@ -144,6 +144,14 @@ export const ErrorAlert = ({ error }: { error: unknown }) => {
     );
 };
 
+export const Field = ({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) => (
+    <label className="field">
+        <span className="field-label">{label}</span>
+        {children}
+        {hint && <span className="field-hint">{hint}</span>}
+    </label>
+);
+
 export const EmptyState = ({
     icon,
     title,

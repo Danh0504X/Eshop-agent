@@ -102,7 +102,7 @@ export const ReturnPage = () => {
                     {order ? (
                         <div className="stack">
                             <Alert tone="warn" title={`Đơn ${order.orderId} đã có video hoàn trả`}>
-                                Mã vận đơn {order.trackingCode}. Mở đơn để xem lại video.
+                                Mã vận đơn {order.trackingCode}. Mở đơn để xem lại hoặc thay video.
                             </Alert>
                             <div className="row-actions">
                                 <LinkButton to={`/orders/${encodeURIComponent(order.orderId)}`} variant="primary">

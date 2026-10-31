@@ -85,6 +85,44 @@ export interface Inspection {
     finishedAt?: string;
 }
 
+/** One line of an order's inspection history; the backend only sends these fields in the list. */
+export type InspectionRun = Pick<Inspection, "_id" | "status" | "claimId" | "createdAt" | "finishedAt">;
+
+export type ClaimStatus = "draft" | "pending_approval" | "approved" | "submitted" | "rejected" | "resolved";
+export type FinalDetermination =
+    "no_determination" | "discrepancy_confirmed_by_reviewer" | "no_discrepancy" | "inconclusive";
+
+export interface Claim {
+    _id: string;
+    orderId: string;
+    inspectionId: string;
+    summary: string;
+    findings: Finding[];
+    evidenceReferences: Array<{
+        frameId: string;
+        mediaId?: string;
+        type: "outbound" | "return";
+        timestampSec?: number;
+    }>;
+    uncertaintyNotes: string[];
+    analysisMode: "real" | "demo";
+    /** Null until the PDF report exists. */
+    reportUrl: string | null;
+    reportGeneratedAt?: string;
+    redaction?: { textRedactions?: number; framesBlurred?: number; framesIncluded?: number };
+    status: ClaimStatus;
+    approval?: {
+        decision?: "approved" | "rejected";
+        decidedAt?: string;
+        reason?: string;
+        finalDetermination?: FinalDetermination;
+    };
+    /** `by` is a user ID, or "agent" / "user" for steps the system did. */
+    history: Array<{ at: string; by?: string; from?: ClaimStatus; to: ClaimStatus; reason?: string }>;
+    createdAt: string;
+    updatedAt: string;
+}
+
 export interface NewOrderInput {
     scanId: string;
     warehouseId: string;

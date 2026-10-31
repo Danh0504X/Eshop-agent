@@ -1,7 +1,7 @@
-import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { IconCheck, IconPlus } from "../components/icons";
 import { LabelScanner } from "../components/LabelScanner";
-import { Alert, Button, Card, ErrorAlert, LinkButton, PageHeader, Pill, Spinner } from "../components/ui";
+import { Alert, Button, Card, ErrorAlert, Field, LinkButton, PageHeader, Pill, Spinner } from "../components/ui";
 import { VideoCapture, type Capture } from "../components/VideoCapture";
 import { ProgressBar, Stepper } from "../components/wizard";
 import { api } from "../lib/api";
@@ -55,14 +55,6 @@ const optional = (value: string) => value.trim() || undefined;
 
 /** Same rule as the backend's warehouseId. */
 const WAREHOUSE_ID = /^[A-Za-z0-9_.-]{1,64}$/;
-
-const Field = ({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) => (
-    <label className="field">
-        <span className="field-label">{label}</span>
-        {children}
-        {hint && <span className="field-hint">{hint}</span>}
-    </label>
-);
 
 const AccessoriesInput = ({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }) => {
     const [draft, setDraft] = useState("");
@@ -294,7 +286,7 @@ export const NewOrderPage = () => {
                                 title={`Mã vận đơn ${existing.trackingCode} đã có đơn ${existing.orderId}`}
                             >
                                 {existing.packingMedia.length
-                                    ? "Đơn này đã có video đóng gói."
+                                    ? "Đơn này đã có video đóng gói. Mở đơn để xem lại hoặc thay video."
                                     : "Đơn này chưa có video đóng gói. Bạn có thể quay bổ sung ngay bây giờ."}
                             </Alert>
                             <div className="row-actions">

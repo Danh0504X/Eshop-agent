@@ -951,8 +951,18 @@ textarea {
 /* ---------------------------------------------------------------------------------------------------------------
    Orders
    --------------------------------------------------------------------------------------------------------------- */
-.orders-search {
+.list-filters {
+    display: flex;
+    gap: 8px;
     margin-bottom: 16px;
+}
+
+.list-filters input {
+    flex: 1;
+}
+
+.list-filters select {
+    flex: 0 1 240px;
 }
 
 .order-list {
@@ -1189,6 +1199,110 @@ a.order-row:hover {
 
 .technical p {
     margin-top: 4px;
+    overflow-wrap: anywhere;
+}
+
+.run-list {
+    display: grid;
+    gap: 4px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.run-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+}
+
+.run-row:hover {
+    background: var(--surface-muted);
+}
+
+.run-row.active {
+    border-color: var(--accent);
+}
+
+.delete-evidence {
+    padding: 12px;
+    border: 1px solid rgb(194 50 29 / 25%);
+    border-radius: var(--radius-sm);
+    background: var(--bad-soft);
+}
+
+.delete-evidence .field-hint {
+    color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------------------------------------------
+   Claims
+   --------------------------------------------------------------------------------------------------------------- */
+.claim-row {
+    display: grid;
+    grid-template-columns: minmax(170px, 1fr) minmax(180px, 1.6fr) 130px 130px;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-top: 1px solid var(--border);
+    color: inherit;
+    text-decoration: none;
+}
+
+a.claim-row:hover {
+    background: var(--surface-muted);
+}
+
+.claim-row.order-row-head {
+    border-top: none;
+}
+
+.order-claims .card-body {
+    padding: 0;
+}
+
+.claim-detail {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    align-items: start;
+    gap: 16px;
+}
+
+.claim-main,
+.claim-side {
+    gap: 16px;
+}
+
+.timeline {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.timeline li {
+    padding-left: 12px;
+    border-left: 2px solid var(--border);
+}
+
+.timeline-head {
+    display: grid;
+}
+
+.timeline-reason {
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 14px;
     overflow-wrap: anywhere;
 }
 
@@ -1544,6 +1658,23 @@ a.order-row:hover {
 
     .order-row-head {
         display: none;
+    }
+
+    .list-filters {
+        flex-direction: column;
+    }
+
+    .list-filters select {
+        flex: none;
+    }
+
+    .claim-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        padding: 14px 16px;
+    }
+
+    .claim-detail {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .order-videos {
